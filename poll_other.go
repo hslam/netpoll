@@ -21,10 +21,6 @@ func (p *Poll) Delete(fd int) (err error) {
 	return
 }
 
-func (p *Poll) kevent(fd int, op uint16) (err error) {
-	return
-}
-
 func (p *Poll) Wait(events []int) (n int, err error) {
 	return
 }
