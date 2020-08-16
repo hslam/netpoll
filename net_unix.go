@@ -13,31 +13,49 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 )
 
-func Serve(lis net.Listener, handle func(req []byte) (res []byte)) error {
-	l := &Listener{netListener: lis}
-	return l.Serve(handle)
+type Event struct {
+	Buffer  int
+	Upgrade func(conn Conn) error
+	Handle  func(req []byte) (res []byte)
+}
+
+func Serve(lis net.Listener, event *Event) error {
+	l := &Listener{Listener: lis, Event: event}
+	return l.Serve()
 }
 
 type Listener struct {
-	netListener net.Listener
-	file        *os.File
-	fd          int
-	workers     []*worker
+	Listener net.Listener
+	Event    *Event
+	file     *os.File
+	fd       int
+	workers  []*worker
 }
 
-func (l *Listener) Serve(handle func(req []byte) (res []byte)) error {
-	var err error
-	switch netListener := l.netListener.(type) {
+func (l *Listener) Serve() (err error) {
+	if l.Listener == nil {
+		return errors.New("listener is nil")
+	}
+	if l.Event == nil {
+		return errors.New("event is nil")
+	} else if l.Event.Upgrade == nil && l.Event.Handle == nil {
+		return errors.New("need Upgrade or Handle")
+	}
+	if l.Event.Buffer < 1 {
+		l.Event.Buffer = 0xFFFF
+	}
+	switch netListener := l.Listener.(type) {
 	case *net.TCPListener:
 		if l.file, err = netListener.File(); err != nil {
-			l.netListener.Close()
+			l.Listener.Close()
 			return err
 		}
 	case *net.UnixListener:
 		if l.file, err = netListener.File(); err != nil {
-			l.netListener.Close()
+			l.Listener.Close()
 			return err
 		}
 	default:
@@ -45,7 +63,7 @@ func (l *Listener) Serve(handle func(req []byte) (res []byte)) error {
 	}
 	l.fd = int(l.file.Fd())
 	if err := syscall.SetNonblock(l.fd, true); err != nil {
-		l.netListener.Close()
+		l.Listener.Close()
 		return err
 	}
 	var wg sync.WaitGroup
@@ -60,7 +78,7 @@ func (l *Listener) Serve(handle func(req []byte) (res []byte)) error {
 			conns:    make(map[int]*conn),
 			poll:     p,
 			events:   make([]int, 0x400),
-			handle:   handle,
+			handle:   l.Event.Handle,
 			done:     make(chan bool, 0x10),
 			tasks:    runtime.NumCPU() * 4,
 		}
@@ -108,7 +126,7 @@ func (w *worker) run(wg *sync.WaitGroup) {
 		for i := 0; i < w.tasks; i++ {
 			w.idle += 1
 			go func(w *worker) {
-				buf := make([]byte, 0xFFFF)
+				buf := make([]byte, w.listener.Event.Buffer)
 				for fd := range w.jobs {
 					atomic.AddInt64(&w.idle, -1)
 					w.read(fd, buf)
@@ -156,7 +174,7 @@ func (w *worker) serve(fd int) error {
 
 func (w *worker) accept() error {
 	if atomic.LoadInt64(&w.count) < 1 || atomic.LoadInt64(&w.count) <= w.listener.min() {
-		nfd, _, err := syscall.Accept(w.listener.fd)
+		nfd, sa, err := syscall.Accept(w.listener.fd)
 		if err != nil {
 			if err == syscall.EAGAIN {
 				return nil
@@ -166,14 +184,55 @@ func (w *worker) accept() error {
 		if err := syscall.SetNonblock(nfd, true); err != nil {
 			return err
 		}
-		c := &conn{fd: nfd, buf: make([]byte, 0xFFFF)}
+		var raddr net.Addr
+		switch sockaddr := sa.(type) {
+		case *syscall.SockaddrUnix:
+			raddr = &net.UnixAddr{Net: "unix", Name: sockaddr.Name}
+		case *syscall.SockaddrInet4:
+			raddr = &net.TCPAddr{
+				IP:   append([]byte{}, sockaddr.Addr[:]...),
+				Port: sockaddr.Port,
+			}
+		case *syscall.SockaddrInet6:
+			var zone string
+			if ifi, err := net.InterfaceByIndex(int(sockaddr.ZoneId)); err == nil {
+				zone = ifi.Name
+			}
+			raddr = &net.TCPAddr{
+				IP:   append([]byte{}, sockaddr.Addr[:]...),
+				Port: sockaddr.Port,
+				Zone: zone,
+			}
+		}
+		c := &conn{fd: nfd, raddr: raddr, laddr: w.listener.Listener.Addr(), buf: make([]byte, w.listener.Event.Buffer)}
+		if w.listener.Event.Upgrade != nil {
+			go func(w *worker, c *conn) {
+				if err := syscall.SetNonblock(c.fd, false); err != nil {
+					return
+				}
+				if err := w.listener.Event.Upgrade(c); err != nil {
+					return
+				}
+				if err := syscall.SetNonblock(c.fd, true); err != nil {
+					return
+				}
+				w.poll.Add(c.fd)
+				w.increase(c)
+				c.ready = true
+			}(w, c)
+			return nil
+		}
 		w.poll.Add(nfd)
 		w.increase(c)
+		c.ready = true
 	}
 	return nil
 }
 
 func (w *worker) read(c *conn, buf []byte) error {
+	if !c.ready {
+		return nil
+	}
 	n, err := c.Read(c.buf)
 	if n == 0 || err != nil {
 		if err == syscall.EAGAIN {
@@ -221,25 +280,63 @@ func (w *worker) Close() {
 	w.poll.Close()
 }
 
-type conn struct {
-	rMu sync.Mutex
-	wMu sync.Mutex
-	fd  int
-	buf []byte
+type Conn interface {
+	Read(b []byte) (n int, err error)
+	Write(b []byte) (n int, err error)
+	Close() error
+	LocalAddr() net.Addr
+	RemoteAddr() net.Addr
+	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
 }
 
-func (c *conn) Read(p []byte) (n int, err error) {
+type conn struct {
+	rMu     sync.Mutex
+	wMu     sync.Mutex
+	fd      int
+	buf     []byte
+	laddr   net.Addr
+	raddr   net.Addr
+	upgrade Conn
+	ready   bool
+}
+
+func (c *conn) Read(b []byte) (n int, err error) {
 	c.rMu.Lock()
 	defer c.rMu.Unlock()
-	return syscall.Read(c.fd, p)
+	n, err = syscall.Read(c.fd, b)
+	if n == 0 {
+		err = syscall.EINVAL
+	}
+	return
 }
 
-func (c *conn) Write(p []byte) (n int, err error) {
+func (c *conn) Write(b []byte) (n int, err error) {
 	c.wMu.Lock()
 	defer c.wMu.Unlock()
-	return syscall.Write(c.fd, p)
+	return syscall.Write(c.fd, b)
 }
 
 func (c *conn) Close() (err error) {
 	return syscall.Close(c.fd)
+}
+func (c *conn) LocalAddr() net.Addr {
+	return c.laddr
+}
+
+func (c *conn) RemoteAddr() net.Addr {
+	return c.raddr
+}
+
+func (c *conn) SetDeadline(t time.Time) error {
+	return errors.New("not supported")
+}
+
+func (c *conn) SetReadDeadline(t time.Time) error {
+	return errors.New("not supported")
+}
+
+func (c *conn) SetWriteDeadline(t time.Time) error {
+	return errors.New("not supported")
 }
