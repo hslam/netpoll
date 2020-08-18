@@ -45,6 +45,10 @@ func (l *Listener) Serve() (err error) {
 			continue
 		}
 		go func(c Conn) {
+			defer func() {
+				if e := recover(); e != nil {
+				}
+			}()
 			if l.Event.Upgrade != nil {
 				if err := l.Event.Upgrade(c); err != nil {
 					return
@@ -52,10 +56,6 @@ func (l *Listener) Serve() (err error) {
 			}
 			var n int
 			var err error
-			defer func() {
-				if e := recover(); e != nil {
-				}
-			}()
 			var buf = make([]byte, l.Event.Buffer)
 			for err == nil {
 				n, err = c.Read(buf)

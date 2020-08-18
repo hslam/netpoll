@@ -207,6 +207,10 @@ func (w *worker) accept() error {
 		c := &conn{fd: nfd, raddr: raddr, laddr: w.listener.Listener.Addr(), buf: make([]byte, w.listener.Event.Buffer)}
 		if w.listener.Event.Upgrade != nil {
 			go func(w *worker, c *conn) {
+				defer func() {
+					if e := recover(); e != nil {
+					}
+				}()
 				if err := syscall.SetNonblock(c.fd, false); err != nil {
 					return
 				}
