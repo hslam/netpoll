@@ -239,7 +239,7 @@ func (w *worker) read(c *conn, buf []byte) error {
 	}
 	n, err := c.Read(c.buf)
 	if n == 0 || err != nil {
-		if err == syscall.EAGAIN {
+		if err == syscall.EAGAIN || c.closed {
 			return nil
 		}
 		w.decrease(c)
@@ -304,6 +304,7 @@ type conn struct {
 	raddr   net.Addr
 	upgrade Conn
 	ready   bool
+	closed  bool
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
@@ -323,6 +324,10 @@ func (c *conn) Write(b []byte) (n int, err error) {
 }
 
 func (c *conn) Close() (err error) {
+	if c.closed {
+		return nil
+	}
+	c.closed = true
 	return syscall.Close(c.fd)
 }
 func (c *conn) LocalAddr() net.Addr {
