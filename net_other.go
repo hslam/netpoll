@@ -37,7 +37,7 @@ func (l *Listener) Serve() (err error) {
 		return errors.New("need Upgrade or Handle")
 	}
 	if l.Event.Buffer < 1 {
-		l.Event.Buffer = 0xFFFF
+		l.Event.Buffer = 0x10000
 	}
 	for {
 		conn, err := l.Listener.Accept()

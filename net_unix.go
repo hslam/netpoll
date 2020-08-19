@@ -45,7 +45,7 @@ func (l *Listener) Serve() (err error) {
 		return errors.New("need Upgrade or Handle")
 	}
 	if l.Event.Buffer < 1 {
-		l.Event.Buffer = 0xFFFF
+		l.Event.Buffer = 0x10000
 	}
 	switch netListener := l.Listener.(type) {
 	case *net.TCPListener:
