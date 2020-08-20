@@ -77,13 +77,13 @@ func (l *Listener) Serve() (err error) {
 			listener: l,
 			conns:    make(map[int]*conn),
 			poll:     p,
-			events:   make([]int, 0x400),
+			events:   make([]PollEvent, 0x400),
 			handle:   l.Event.Handle,
 			done:     make(chan bool, 0x10),
 			tasks:    runtime.NumCPU() * 4,
 		}
 		w.jobs = make(chan *conn, w.tasks)
-		w.poll.Add(l.fd)
+		w.poll.Register(l.fd)
 		l.workers = append(l.workers, w)
 		wg.Add(1)
 		go w.run(&wg)
@@ -111,7 +111,7 @@ type worker struct {
 	mu       sync.Mutex
 	conns    map[int]*conn
 	poll     *Poll
-	events   []int
+	events   []PollEvent
 	handle   func(req []byte) (res []byte)
 	tasks    int
 	idle     int64
@@ -145,7 +145,8 @@ func (w *worker) run(wg *sync.WaitGroup) {
 	}
 }
 
-func (w *worker) serve(fd int) error {
+func (w *worker) serve(ev PollEvent) error {
+	fd := ev.Fd
 	if fd == 0 {
 		return nil
 	}
@@ -220,13 +221,13 @@ func (w *worker) accept() error {
 				if err := syscall.SetNonblock(c.fd, true); err != nil {
 					return
 				}
-				w.poll.Add(c.fd)
+				w.poll.Register(c.fd)
 				w.increase(c)
 				c.ready = true
 			}(w, c)
 			return nil
 		}
-		w.poll.Add(nfd)
+		w.poll.Register(c.fd)
 		w.increase(c)
 		c.ready = true
 	}
