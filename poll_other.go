@@ -16,15 +16,19 @@ func Create() (*Poll, error) {
 	return nil, errors.New("system not supported")
 }
 
-func (p *Poll) Add(fd int) (err error) {
+func (p *Poll) Register(fd int) (err error) {
 	return
 }
 
-func (p *Poll) Delete(fd int) (err error) {
+func (p *Poll) Write(fd int) (err error) {
 	return
 }
 
-func (p *Poll) Wait(events []int) (n int, err error) {
+func (p *Poll) Unregister(fd int) (err error) {
+	return
+}
+
+func (p *Poll) Wait(events []PollEvent) (n int, err error) {
 	return
 }
 

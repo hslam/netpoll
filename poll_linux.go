@@ -23,24 +23,26 @@ func Create() (*Poll, error) {
 	return &Poll{
 		fd:     fd,
 		events: make([]syscall.EpollEvent, 1024),
-		event:  syscall.EpollEvent{Events: syscall.EPOLLIN},
+		event:  syscall.EpollEvent{},
 	}, nil
 }
 
-func (p *Poll) Add(fd int) (err error) {
-	return p.ctl(fd,syscall.EPOLL_CTL_ADD)
+func (p *Poll) Register(fd int) (err error) {
+	p.event.Fd, p.event.Events = int32(fd), syscall.EPOLLIN
+	return syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_ADD, fd, &p.event)
 }
 
-func (p *Poll) Delete(fd int) (err error) {
-	return p.ctl(fd,syscall.EPOLL_CTL_DEL)
+func (p *Poll) Write(fd int) (err error) {
+	p.event.Fd, p.event.Events = int32(fd), syscall.EPOLLIN|syscall.EPOLLOUT
+	return syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_MOD, fd, &p.event)
 }
 
-func (p *Poll) ctl(fd int, op int) error {
-	p.event.Fd = int32(fd)
-	return syscall.EpollCtl(p.fd, op, fd, &p.event)
+func (p *Poll) Unregister(fd int) (err error) {
+	p.event.Fd, p.event.Events = int32(fd), syscall.EPOLLIN|syscall.EPOLLOUT
+	return syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_DEL, fd, &p.event)
 }
 
-func (p *Poll) Wait(events []int) (n int, err error) {
+func (p *Poll) Wait(events []PollEvent) (n int, err error) {
 	if cap(p.events) >= len(events) {
 		p.events = p.events[:len(events)]
 	} else {
@@ -51,7 +53,15 @@ func (p *Poll) Wait(events []int) (n int, err error) {
 		return 0, err
 	}
 	for i := 0; i < n; i++ {
-		events[i] = int(p.events[i].Fd)
+		ev := p.events[i]
+		events[i].Fd = int(ev.Fd)
+		if ev.Events&syscall.EPOLLIN != 0 {
+			events[i].Mode = READ
+		} else if ev.Events&syscall.EPOLLOUT != 0 {
+			events[i].Mode = WRITE
+			p.event.Fd, p.event.Events = ev.Fd, syscall.EPOLLIN
+			syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_MOD, int(ev.Fd), &p.event)
+		}
 	}
 	return
 }
