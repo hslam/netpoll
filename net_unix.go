@@ -160,16 +160,23 @@ func (w *worker) serve(ev PollEvent) error {
 		return nil
 	} else {
 		w.mu.Unlock()
-		if atomic.LoadInt64(&w.count) > 1 {
-			if atomic.LoadInt64(&w.idle) > 0 {
-				w.jobs <- c
-			} else {
-				go w.read(c, []byte{})
-			}
+		switch ev.Mode {
+		case WRITE:
+			w.write(c)
 			return nil
-		} else {
-			return w.read(c, nil)
+		case READ:
+			if atomic.LoadInt64(&w.count) > 1 {
+				if atomic.LoadInt64(&w.idle) > 0 {
+					w.jobs <- c
+				} else {
+					go w.read(c, []byte{})
+				}
+				return nil
+			} else {
+				return w.read(c, nil)
+			}
 		}
+		return nil
 	}
 }
 
@@ -205,7 +212,7 @@ func (w *worker) accept() error {
 				Zone: zone,
 			}
 		}
-		c := &conn{fd: nfd, raddr: raddr, laddr: w.listener.Listener.Addr(), buf: make([]byte, w.listener.Event.Buffer)}
+		c := &conn{w: w, fd: nfd, raddr: raddr, laddr: w.listener.Listener.Addr(), buf: make([]byte, w.listener.Event.Buffer)}
 		if w.listener.Event.Upgrade != nil {
 			go func(w *worker, c *conn) {
 				defer func() {
@@ -230,6 +237,18 @@ func (w *worker) accept() error {
 		w.poll.Register(c.fd)
 		w.increase(c)
 		c.ready = true
+	}
+	return nil
+}
+
+func (w *worker) write(c *conn) error {
+	if !c.ready {
+		return nil
+	}
+	if retain, err := c.flush(); err != nil {
+		return err
+	} else if retain > 0 {
+		w.poll.Write(c.fd)
 	}
 	return nil
 }
@@ -259,7 +278,10 @@ func (w *worker) read(c *conn, buf []byte) error {
 		}
 	}
 	res := w.handle(req)
-	c.Write(res)
+	if len(res) > 0 {
+		c.write(res)
+		w.write(c)
+	}
 	return nil
 }
 
@@ -296,11 +318,26 @@ type Conn interface {
 	SetWriteDeadline(t time.Time) error
 }
 
+type Writer interface {
+	Write(p []byte) (n int, err error)
+}
+
+type writer struct {
+	c *conn
+}
+
+func (w *writer) Write(b []byte) (n int, err error) {
+	defer w.c.w.poll.Write(w.c.fd)
+	return w.c.write(b)
+}
+
 type conn struct {
+	w       *worker
 	rMu     sync.Mutex
 	wMu     sync.Mutex
 	fd      int
 	buf     []byte
+	send    []byte
 	laddr   net.Addr
 	raddr   net.Addr
 	upgrade Conn
@@ -321,7 +358,44 @@ func (c *conn) Read(b []byte) (n int, err error) {
 func (c *conn) Write(b []byte) (n int, err error) {
 	c.wMu.Lock()
 	defer c.wMu.Unlock()
-	return syscall.Write(c.fd, b)
+	var retain = len(b)
+	for retain > 0 {
+		n, err = syscall.Write(c.fd, b[len(b)-retain:])
+		if err != nil {
+			return len(b) - retain, err
+		}
+		retain -= n
+	}
+	return len(b), nil
+}
+
+func (c *conn) write(b []byte) (n int, err error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
+	c.wMu.Lock()
+	defer c.wMu.Unlock()
+	c.send = append(c.send, b...)
+	return len(b), nil
+}
+
+func (c *conn) flush() (retain int, err error) {
+	c.wMu.Lock()
+	defer c.wMu.Unlock()
+	if len(c.send) == 0 {
+		return 0, nil
+	}
+	if n, err := syscall.Write(c.fd, c.send); err != nil || n < 1 {
+		return len(c.send), err
+	} else if n < len(c.send) {
+		num := copy(c.send, c.send[n:])
+		c.send = c.send[:num]
+		return num, nil
+	} else {
+		c.send = c.send[:0]
+		return 0, nil
+	}
+	return
 }
 
 func (c *conn) Close() (err error) {
