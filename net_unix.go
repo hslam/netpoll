@@ -356,6 +356,9 @@ func (c *conn) Read(b []byte) (n int, err error) {
 }
 
 func (c *conn) Write(b []byte) (n int, err error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
 	c.wMu.Lock()
 	defer c.wMu.Unlock()
 	var retain = len(b)
