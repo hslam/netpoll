@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+var numCPU = runtime.NumCPU()
+
 type Event struct {
 	Buffer  int
 	Upgrade func(conn Conn) error
@@ -67,10 +69,14 @@ func (l *Listener) Serve() (err error) {
 		return err
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < runtime.NumCPU()*2; i++ {
+	for i := 0; i < numCPU*4+1; i++ {
 		p, err := Create()
 		if err != nil {
-			panic(err)
+			return err
+		}
+		var async bool
+		if i >= numCPU*4 {
+			async = true
 		}
 		w := &worker{
 			index:    i,
@@ -79,10 +85,11 @@ func (l *Listener) Serve() (err error) {
 			poll:     p,
 			events:   make([]PollEvent, 0x400),
 			handle:   l.Event.Handle,
+			async:    async,
 			done:     make(chan bool, 0x10),
-			tasks:    runtime.NumCPU() * 4,
+			tasks:    numCPU * 4,
 		}
-		w.jobs = make(chan *conn, w.tasks)
+		w.jobs = make(chan *job, w.tasks)
 		w.poll.Register(l.fd)
 		l.workers = append(l.workers, w)
 		wg.Add(1)
@@ -93,15 +100,24 @@ func (l *Listener) Serve() (err error) {
 }
 
 func (l *Listener) min() int64 {
-	min := l.workers[0].count
-	if len(l.workers) > 1 {
-		for i := 1; i < len(l.workers); i++ {
+	min := l.workers[numCPU*4].count
+	if len(l.workers) > numCPU*4 {
+		for i := numCPU*4 + 1; i < len(l.workers); i++ {
 			if l.workers[i].count < min {
 				min = l.workers[i].count
 			}
 		}
 	}
 	return min
+}
+
+func (l *Listener) idle() bool {
+	for i := 0; i < numCPU*4; i++ {
+		if l.workers[i].count < 1 {
+			return true
+		}
+	}
+	return false
 }
 
 type worker struct {
@@ -113,25 +129,25 @@ type worker struct {
 	poll     *Poll
 	events   []PollEvent
 	handle   func(req []byte) (res []byte)
+	async    bool
 	tasks    int
 	idle     int64
-	jobs     chan *conn
+	jobs     chan *job
 	done     chan bool
+}
+
+type job struct {
+	conn *conn
+	req  []byte
 }
 
 func (w *worker) run(wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer w.Close()
-	if w.handle != nil {
+	if w.handle != nil && w.async {
 		for i := 0; i < w.tasks; i++ {
 			w.idle += 1
-			go func(w *worker) {
-				buf := make([]byte, w.listener.Event.Buffer)
-				for fd := range w.jobs {
-					w.read(fd, buf)
-					atomic.AddInt64(&w.idle, 1)
-				}
-			}(w)
+			go w.task()
 		}
 	}
 	var n int
@@ -141,6 +157,14 @@ func (w *worker) run(wg *sync.WaitGroup) {
 		for i := 0; i < n; i++ {
 			w.serve(w.events[i])
 		}
+	}
+}
+
+func (w *worker) task() {
+	for job := range w.jobs {
+		res := w.handle(job.req)
+		job.conn.Write(res)
+		atomic.AddInt64(&w.idle, 1)
 	}
 }
 
@@ -162,26 +186,16 @@ func (w *worker) serve(ev PollEvent) error {
 		switch ev.Mode {
 		case WRITE:
 			w.write(c)
-			return nil
 		case READ:
-			if atomic.LoadInt64(&w.count) > 1 {
-				if atomic.LoadInt64(&w.idle) > 0 {
-					atomic.AddInt64(&w.idle, -1)
-					w.jobs <- c
-				} else {
-					go w.read(c, []byte{})
-				}
-				return nil
-			} else {
-				return w.read(c, nil)
-			}
+			w.read(c)
 		}
 		return nil
 	}
 }
 
-func (w *worker) accept() error {
-	if atomic.LoadInt64(&w.count) < 1 || atomic.LoadInt64(&w.count) <= w.listener.min() {
+func (w *worker) accept() (err error) {
+	if w.listener.idle() && !w.async && atomic.LoadInt64(&w.count) < 1 ||
+		!w.listener.idle() && w.async && atomic.LoadInt64(&w.count) <= w.listener.min() {
 		nfd, sa, err := syscall.Accept(w.listener.fd)
 		if err != nil {
 			if err == syscall.EAGAIN {
@@ -228,13 +242,11 @@ func (w *worker) accept() error {
 				if err := syscall.SetNonblock(c.fd, true); err != nil {
 					return
 				}
-				w.poll.Register(c.fd)
 				w.increase(c)
 				c.ready = true
 			}(w, c)
 			return nil
 		}
-		w.poll.Register(c.fd)
 		w.increase(c)
 		c.ready = true
 	}
@@ -253,7 +265,7 @@ func (w *worker) write(c *conn) error {
 	return nil
 }
 
-func (w *worker) read(c *conn, buf []byte) error {
+func (w *worker) read(c *conn) error {
 	if !c.ready {
 		return nil
 	}
@@ -266,21 +278,24 @@ func (w *worker) read(c *conn, buf []byte) error {
 		c.Close()
 		return nil
 	}
-	var req []byte
-	req = c.buf[:n]
-	if buf != nil {
-		if cap(buf) >= n {
-			req = buf[:n]
-			copy(req, c.buf[:n])
+	if w.async {
+		req := make([]byte, n)
+		copy(req, c.buf[:n])
+		if atomic.LoadInt64(&w.idle) > 0 {
+			atomic.AddInt64(&w.idle, -1)
+			w.jobs <- &job{conn: c, req: req}
 		} else {
-			req = make([]byte, n)
-			copy(req, c.buf[:n])
+			go func(c *conn, req []byte) {
+				res := w.handle(req)
+				c.Write(res)
+			}(c, req)
 		}
-	}
-	res := w.handle(req)
-	if len(res) > 0 {
-		c.write(res)
-		w.write(c)
+		return nil
+	} else {
+		req := c.buf[:n]
+		res := w.handle(req)
+		c.Write(res)
+
 	}
 	return nil
 }
@@ -290,9 +305,11 @@ func (w *worker) increase(c *conn) {
 	w.conns[c.fd] = c
 	w.mu.Unlock()
 	atomic.AddInt64(&w.count, 1)
+	w.poll.Register(c.fd)
 }
 
 func (w *worker) decrease(c *conn) {
+	w.poll.Unregister(c.fd)
 	atomic.AddInt64(&w.count, -1)
 	w.mu.Lock()
 	delete(w.conns, c.fd)
@@ -364,7 +381,7 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	var retain = len(b)
 	for retain > 0 {
 		n, err = syscall.Write(c.fd, b[len(b)-retain:])
-		if err != nil {
+		if n < 1 || err != nil {
 			return len(b) - retain, err
 		}
 		retain -= n
