@@ -28,13 +28,13 @@ func Create() (*Poll, error) {
 }
 
 func (p *Poll) Register(fd int) (err error) {
-	p.changes[0].Ident, p.changes[0].Flags = uint64(fd), syscall.EV_ADD|syscall.EV_CLEAR
+	p.changes[0].Ident, p.changes[0].Flags = uint64(fd), syscall.EV_ADD
 	_, err = syscall.Kevent(p.fd, p.changes[:1], nil, nil)
 	return
 }
 
 func (p *Poll) Write(fd int) (err error) {
-	p.changes[1].Ident, p.changes[1].Flags = uint64(fd), syscall.EV_ADD|syscall.EV_CLEAR
+	p.changes[1].Ident, p.changes[1].Flags = uint64(fd), syscall.EV_ADD
 	_, err = syscall.Kevent(p.fd, p.changes[1:], nil, nil)
 	return
 }
