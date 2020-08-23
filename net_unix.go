@@ -128,7 +128,6 @@ func (w *worker) run(wg *sync.WaitGroup) {
 			go func(w *worker) {
 				buf := make([]byte, w.listener.Event.Buffer)
 				for fd := range w.jobs {
-					atomic.AddInt64(&w.idle, -1)
 					w.read(fd, buf)
 					atomic.AddInt64(&w.idle, 1)
 				}
@@ -167,6 +166,7 @@ func (w *worker) serve(ev PollEvent) error {
 		case READ:
 			if atomic.LoadInt64(&w.count) > 1 {
 				if atomic.LoadInt64(&w.idle) > 0 {
+					atomic.AddInt64(&w.idle, -1)
 					w.jobs <- c
 				} else {
 					go w.read(c, []byte{})
