@@ -13,7 +13,7 @@ import (
 
 type Event struct {
 	Buffer  int
-	Upgrade func(conn Conn) error
+	Upgrade func(conn Conn) (Conn, error)
 	Handle  func(req []byte) (res []byte)
 }
 
@@ -50,8 +50,10 @@ func (l *Listener) Serve() (err error) {
 				}
 			}()
 			if l.Event.Upgrade != nil {
-				if err := l.Event.Upgrade(c); err != nil {
+				if upgrade, err := l.Event.Upgrade(c); err != nil {
 					return
+				} else if upgrade != nil && upgrade != c {
+					c = upgrade
 				}
 			}
 			var n int
