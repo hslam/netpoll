@@ -20,7 +20,7 @@ var numCPU = runtime.NumCPU()
 
 type Event struct {
 	Buffer  int
-	Upgrade func(conn Conn) error
+	Upgrade func(conn Conn) (Conn, error)
 	Handle  func(req []byte) (res []byte)
 }
 
@@ -163,7 +163,11 @@ func (w *worker) run(wg *sync.WaitGroup) {
 func (w *worker) task() {
 	for job := range w.jobs {
 		res := w.handle(job.req)
-		job.conn.Write(res)
+		if job.conn.upgrade != nil {
+			job.conn.upgrade.Write(res)
+		} else {
+			job.conn.Write(res)
+		}
 		atomic.AddInt64(&w.idle, 1)
 	}
 }
@@ -236,8 +240,10 @@ func (w *worker) accept() (err error) {
 				if err := syscall.SetNonblock(c.fd, false); err != nil {
 					return
 				}
-				if err := w.listener.Event.Upgrade(c); err != nil {
+				if upgrade, err := w.listener.Event.Upgrade(c); err != nil {
 					return
+				} else if upgrade != nil && upgrade != c {
+					c.upgrade = upgrade
 				}
 				if err := syscall.SetNonblock(c.fd, true); err != nil {
 					return
@@ -269,7 +275,14 @@ func (w *worker) read(c *conn) error {
 	if !c.ready {
 		return nil
 	}
-	n, err := c.Read(c.buf)
+	var n int
+	var err error
+	if c.upgrade != nil {
+		n, err = c.upgrade.Read(c.buf)
+
+	} else {
+		n, err = c.Read(c.buf)
+	}
 	if n == 0 || err != nil {
 		if err == syscall.EAGAIN || c.closed {
 			return nil
@@ -287,14 +300,23 @@ func (w *worker) read(c *conn) error {
 		} else {
 			go func(c *conn, req []byte) {
 				res := w.handle(req)
-				c.Write(res)
+				if c.upgrade != nil {
+					c.upgrade.Write(res)
+				} else {
+					c.Write(res)
+				}
 			}(c, req)
 		}
 		return nil
 	} else {
 		req := c.buf[:n]
 		res := w.handle(req)
-		c.Write(res)
+		if c.upgrade != nil {
+			c.upgrade.Write(res)
+
+		} else {
+			c.Write(res)
+		}
 
 	}
 	return nil
@@ -368,6 +390,9 @@ func (c *conn) Read(b []byte) (n int, err error) {
 	n, err = syscall.Read(c.fd, b)
 	if n == 0 {
 		err = syscall.EINVAL
+	}
+	if n < 0 {
+		n = 0
 	}
 	return
 }
