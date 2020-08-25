@@ -18,14 +18,6 @@ import (
 
 var numCPU = runtime.NumCPU()
 
-type Event struct {
-	Buffer  int
-	NoCopy  bool
-	Shared  bool
-	Upgrade func(conn Conn) (Conn, error)
-	Handle  func(req []byte) (res []byte)
-}
-
 func Serve(lis net.Listener, event *Event) error {
 	l := &Listener{Listener: lis, Event: event}
 	return l.Serve()
@@ -63,7 +55,8 @@ func (l *Listener) Serve() (err error) {
 			return err
 		}
 	default:
-		return errors.New("listener not supported")
+		listener := &listener{Listener: l.Listener, Event: l.Event}
+		return listener.Serve()
 	}
 	l.fd = int(l.file.Fd())
 	if err := syscall.SetNonblock(l.fd, true); err != nil {
@@ -308,7 +301,7 @@ func (w *worker) read(c *conn) error {
 	}
 	req := buf[:n]
 	if w.listener.Event.Shared || !w.listener.Event.NoCopy {
-		req := make([]byte, n)
+		req = make([]byte, n)
 		copy(req, buf[:n])
 	}
 	if w.async {
@@ -361,21 +354,6 @@ func (w *worker) Close() {
 		w.jobs = nil
 	}
 	w.poll.Close()
-}
-
-type Conn interface {
-	Read(b []byte) (n int, err error)
-	Write(b []byte) (n int, err error)
-	Close() error
-	LocalAddr() net.Addr
-	RemoteAddr() net.Addr
-	SetDeadline(t time.Time) error
-	SetReadDeadline(t time.Time) error
-	SetWriteDeadline(t time.Time) error
-}
-
-type Writer interface {
-	Write(p []byte) (n int, err error)
 }
 
 type writer struct {
