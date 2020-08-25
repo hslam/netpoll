@@ -21,6 +21,7 @@ var numCPU = runtime.NumCPU()
 type Event struct {
 	Buffer  int
 	NoCopy  bool
+	Shared  bool
 	Upgrade func(conn Conn) (Conn, error)
 	Handle  func(req []byte) (res []byte)
 }
@@ -90,6 +91,9 @@ func (l *Listener) Serve() (err error) {
 			done:     make(chan bool, 0x10),
 			tasks:    numCPU * 4,
 		}
+		if l.Event.Shared {
+			w.buf = make([]byte, l.Event.Buffer)
+		}
 		w.jobs = make(chan *job, w.tasks)
 		w.poll.Register(l.fd)
 		l.workers = append(l.workers, w)
@@ -129,6 +133,7 @@ type worker struct {
 	conns    map[int]*conn
 	poll     *Poll
 	events   []PollEvent
+	buf      []byte
 	handle   func(req []byte) (res []byte)
 	async    bool
 	tasks    int
@@ -231,7 +236,10 @@ func (w *worker) accept() (err error) {
 				Zone: zone,
 			}
 		}
-		c := &conn{w: w, fd: nfd, raddr: raddr, laddr: w.listener.Listener.Addr(), buf: make([]byte, w.listener.Event.Buffer)}
+		c := &conn{w: w, fd: nfd, raddr: raddr, laddr: w.listener.Listener.Addr()}
+		if !w.listener.Event.Shared {
+			c.buf = make([]byte, w.listener.Event.Buffer)
+		}
 		if w.listener.Event.Upgrade != nil {
 			go func(w *worker, c *conn) {
 				defer func() {
@@ -278,11 +286,17 @@ func (w *worker) read(c *conn) error {
 	}
 	var n int
 	var err error
+	var buf []byte
+	if w.listener.Event.Shared {
+		buf = w.buf
+	} else {
+		buf = c.buf
+	}
 	if c.upgrade != nil {
-		n, err = c.upgrade.Read(c.buf)
+		n, err = c.upgrade.Read(buf)
 
 	} else {
-		n, err = c.Read(c.buf)
+		n, err = c.Read(buf)
 	}
 	if n == 0 || err != nil {
 		if err == syscall.EAGAIN || c.closed {
@@ -292,10 +306,10 @@ func (w *worker) read(c *conn) error {
 		c.Close()
 		return nil
 	}
-	req := c.buf[:n]
-	if !w.listener.Event.NoCopy {
+	req := buf[:n]
+	if w.listener.Event.Shared || !w.listener.Event.NoCopy {
 		req := make([]byte, n)
-		copy(req, c.buf[:n])
+		copy(req, buf[:n])
 	}
 	if w.async {
 		if atomic.LoadInt64(&w.idle) > 0 {
