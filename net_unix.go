@@ -20,6 +20,7 @@ var numCPU = runtime.NumCPU()
 
 type Event struct {
 	Buffer  int
+	NoCopy  bool
 	Upgrade func(conn Conn) (Conn, error)
 	Handle  func(req []byte) (res []byte)
 }
@@ -291,9 +292,12 @@ func (w *worker) read(c *conn) error {
 		c.Close()
 		return nil
 	}
-	if w.async {
+	req := c.buf[:n]
+	if !w.listener.Event.NoCopy {
 		req := make([]byte, n)
 		copy(req, c.buf[:n])
+	}
+	if w.async {
 		if atomic.LoadInt64(&w.idle) > 0 {
 			atomic.AddInt64(&w.idle, -1)
 			w.jobs <- &job{conn: c, req: req}
@@ -309,7 +313,6 @@ func (w *worker) read(c *conn) error {
 		}
 		return nil
 	} else {
-		req := c.buf[:n]
 		res := w.handle(req)
 		if c.upgrade != nil {
 			c.upgrade.Write(res)

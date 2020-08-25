@@ -13,6 +13,7 @@ import (
 
 type Event struct {
 	Buffer  int
+	NoCopy  bool
 	Upgrade func(conn Conn) (Conn, error)
 	Handle  func(req []byte) (res []byte)
 }
@@ -64,7 +65,12 @@ func (l *Listener) Serve() (err error) {
 				if err != nil {
 					break
 				}
-				res := l.Event.Handle(buf[:n])
+				req := buf[:n]
+				if !l.Event.NoCopy {
+					req := make([]byte, n)
+					copy(req, buf[:n])
+				}
+				res := l.Event.Handle(req)
 				n, err = c.Write(res)
 			}
 			c.Close()
