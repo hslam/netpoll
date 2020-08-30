@@ -83,7 +83,6 @@ func (l *Listener) Serve() (err error) {
 			async:    async,
 			done:     make(chan bool, 0x10),
 			jobs:     make(chan *job),
-			tasks:    make(chan struct{}, numCPU),
 		}
 		if l.Event.Shared {
 			w.buf = make([]byte, l.Event.Buffer)
@@ -129,7 +128,6 @@ type worker struct {
 	buf      []byte
 	handle   func(req []byte) (res []byte)
 	async    bool
-	tasks    chan struct{}
 	jobs     chan *job
 	done     chan bool
 }
@@ -142,36 +140,21 @@ type job struct {
 func (w *worker) schedule(j *job) error {
 	select {
 	case w.jobs <- j:
-	case w.tasks <- struct{}{}:
-		go w.task(j, false)
 	default:
-		go w.task(j, true)
+		go w.task(j)
 	}
 	return nil
 }
 
-func (w *worker) task(j *job, overflow bool) {
-	defer func() {
-		if !overflow {
-			<-w.tasks
-		}
-	}()
+func (w *worker) task(j *job) {
 	for {
 		w.do(j.conn, j.req)
-		if overflow {
-			select {
-			case j = <-w.jobs:
-			case <-time.After(time.Second):
-				return
-			case <-w.done:
-				return
-			}
-		} else {
-			select {
-			case j = <-w.jobs:
-			case <-w.done:
-				return
-			}
+		select {
+		case j = <-w.jobs:
+		case <-time.After(time.Second):
+			return
+		case <-w.done:
+			return
 		}
 	}
 }
