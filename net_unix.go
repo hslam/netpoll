@@ -83,6 +83,7 @@ func (l *Listener) Serve() (err error) {
 			async:    async,
 			done:     make(chan bool, 0x10),
 			jobs:     make(chan *job),
+			tasks:    numCPU * 4,
 		}
 		if l.Event.Shared {
 			w.buf = make([]byte, l.Event.Buffer)
@@ -129,6 +130,7 @@ type worker struct {
 	handle   func(req []byte) (res []byte)
 	async    bool
 	jobs     chan *job
+	tasks    int
 	done     chan bool
 }
 
@@ -137,22 +139,11 @@ type job struct {
 	req  []byte
 }
 
-func (w *worker) schedule(j *job) error {
-	select {
-	case w.jobs <- j:
-	default:
-		go w.task(j)
-	}
-	return nil
-}
-
-func (w *worker) task(j *job) {
+func (w *worker) task() {
 	for {
-		w.do(j.conn, j.req)
 		select {
-		case j = <-w.jobs:
-		case <-time.After(time.Second):
-			return
+		case j := <-w.jobs:
+			w.do(j.conn, j.req)
 		case <-w.done:
 			return
 		}
@@ -162,6 +153,11 @@ func (w *worker) task(j *job) {
 func (w *worker) run(wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer w.Close()
+	if w.async && w.handle != nil {
+		for i := 0; i < w.tasks; i++ {
+			go w.task()
+		}
+	}
 	var n int
 	var err error
 	for err == nil {
@@ -306,8 +302,11 @@ func (w *worker) read(c *conn) error {
 		copy(req, buf[:n])
 	}
 	if w.async {
-		w.schedule(&job{c, req})
-		return nil
+		select {
+		case w.jobs <- &job{c, req}:
+		default:
+			go w.do(c, req)
+		}
 	} else {
 		w.do(c, req)
 	}
