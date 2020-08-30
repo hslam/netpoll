@@ -82,12 +82,12 @@ func (l *Listener) Serve() (err error) {
 			handle:   l.Event.Handle,
 			async:    async,
 			done:     make(chan bool, 0x10),
-			tasks:    numCPU * 4,
+			jobs:     make(chan *job),
+			tasks:    make(chan struct{}, numCPU),
 		}
 		if l.Event.Shared {
 			w.buf = make([]byte, l.Event.Buffer)
 		}
-		w.jobs = make(chan *job, w.tasks)
 		w.poll.Register(l.fd)
 		l.workers = append(l.workers, w)
 		wg.Add(1)
@@ -129,8 +129,7 @@ type worker struct {
 	buf      []byte
 	handle   func(req []byte) (res []byte)
 	async    bool
-	tasks    int
-	idle     int64
+	tasks    chan struct{}
 	jobs     chan *job
 	done     chan bool
 }
@@ -140,15 +139,46 @@ type job struct {
 	req  []byte
 }
 
+func (w *worker) schedule(j *job) error {
+	select {
+	case w.jobs <- j:
+	case w.tasks <- struct{}{}:
+		go w.task(j, false)
+	default:
+		go w.task(j, true)
+	}
+	return nil
+}
+
+func (w *worker) task(j *job, overflow bool) {
+	defer func() {
+		if !overflow {
+			<-w.tasks
+		}
+	}()
+	for {
+		w.do(j.conn, j.req)
+		if overflow {
+			select {
+			case j = <-w.jobs:
+			case <-time.After(time.Second):
+				return
+			case <-w.done:
+				return
+			}
+		} else {
+			select {
+			case j = <-w.jobs:
+			case <-w.done:
+				return
+			}
+		}
+	}
+}
+
 func (w *worker) run(wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer w.Close()
-	if w.handle != nil && w.async {
-		for i := 0; i < w.tasks; i++ {
-			w.idle += 1
-			go w.task()
-		}
-	}
 	var n int
 	var err error
 	for err == nil {
@@ -156,18 +186,6 @@ func (w *worker) run(wg *sync.WaitGroup) {
 		for i := 0; i < n; i++ {
 			w.serve(w.events[i])
 		}
-	}
-}
-
-func (w *worker) task() {
-	for job := range w.jobs {
-		res := w.handle(job.req)
-		if job.conn.upgrade != nil {
-			job.conn.upgrade.Write(res)
-		} else {
-			job.conn.Write(res)
-		}
-		atomic.AddInt64(&w.idle, 1)
 	}
 }
 
@@ -305,31 +323,21 @@ func (w *worker) read(c *conn) error {
 		copy(req, buf[:n])
 	}
 	if w.async {
-		if atomic.LoadInt64(&w.idle) > 0 {
-			atomic.AddInt64(&w.idle, -1)
-			w.jobs <- &job{conn: c, req: req}
-		} else {
-			go func(c *conn, req []byte) {
-				res := w.handle(req)
-				if c.upgrade != nil {
-					c.upgrade.Write(res)
-				} else {
-					c.Write(res)
-				}
-			}(c, req)
-		}
+		w.schedule(&job{c, req})
 		return nil
 	} else {
-		res := w.handle(req)
-		if c.upgrade != nil {
-			c.upgrade.Write(res)
-
-		} else {
-			c.Write(res)
-		}
-
+		w.do(c, req)
 	}
 	return nil
+}
+
+func (w *worker) do(c *conn, req []byte) {
+	res := w.handle(req)
+	if c.upgrade != nil {
+		c.upgrade.Write(res)
+	} else {
+		c.Write(res)
+	}
 }
 
 func (w *worker) increase(c *conn) {
