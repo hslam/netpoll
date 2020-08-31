@@ -248,20 +248,15 @@ func (w *worker) accept() (err error) {
 					return
 				}
 				w.increase(c)
-				c.ready = true
 			}(w, c)
 			return nil
 		}
 		w.increase(c)
-		c.ready = true
 	}
 	return nil
 }
 
 func (w *worker) write(c *conn) error {
-	if !c.ready {
-		return nil
-	}
 	if retain, err := c.flush(); err != nil {
 		return err
 	} else if retain > 0 {
@@ -271,9 +266,6 @@ func (w *worker) write(c *conn) error {
 }
 
 func (w *worker) read(c *conn) error {
-	if !c.ready {
-		return nil
-	}
 	var n int
 	var err error
 	var buf []byte
@@ -365,7 +357,6 @@ type conn struct {
 	laddr   net.Addr
 	raddr   net.Addr
 	upgrade Conn
-	ready   bool
 	closed  bool
 }
 
