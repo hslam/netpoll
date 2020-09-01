@@ -266,45 +266,50 @@ func (w *worker) write(c *conn) error {
 }
 
 func (w *worker) read(c *conn) error {
-	var n int
-	var err error
-	var buf []byte
-	if w.listener.Event.Shared || w.listener.Event.NoAsync {
-		buf = w.buf
-	} else {
-		buf = c.buf
-	}
-	if c.upgrade != nil {
-		n, err = c.upgrade.Read(buf)
+	for {
+		var n int
+		var err error
+		var buf []byte
+		if w.listener.Event.Shared || w.listener.Event.NoAsync {
+			buf = w.buf
+		} else {
+			buf = c.buf
+		}
+		if c.upgrade != nil {
+			n, err = c.upgrade.Read(buf)
 
-	} else {
-		n, err = c.Read(buf)
-	}
-	if n == 0 || err != nil {
-		if err == syscall.EAGAIN || c.closed {
+		} else {
+			n, err = c.Read(buf)
+		}
+		if n == 0 || err != nil {
+			if err == syscall.EAGAIN || c.closed {
+				return nil
+			}
+			w.decrease(c)
+			c.Close()
 			return nil
 		}
-		w.decrease(c)
-		c.Close()
-		return nil
-	}
-	req := buf[:n]
-	if w.async && !w.listener.Event.NoAsync {
-		if w.listener.Event.Shared || !w.listener.Event.NoCopy {
-			req = make([]byte, n)
-			copy(req, buf[:n])
+		req := buf[:n]
+		if w.async && !w.listener.Event.NoAsync {
+			if w.listener.Event.Shared || !w.listener.Event.NoCopy {
+				req = make([]byte, n)
+				copy(req, buf[:n])
+			}
+			select {
+			case w.jobs <- &job{c, req}:
+			default:
+				go w.do(c, req)
+			}
+		} else {
+			if !w.listener.Event.NoCopy {
+				req = make([]byte, n)
+				copy(req, buf[:n])
+			}
+			w.do(c, req)
 		}
-		select {
-		case w.jobs <- &job{c, req}:
-		default:
-			go w.do(c, req)
+		if c.upgrade == nil {
+			break
 		}
-	} else {
-		if !w.listener.Event.NoCopy {
-			req = make([]byte, n)
-			copy(req, buf[:n])
-		}
-		w.do(c, req)
 	}
 	return nil
 }
