@@ -28,6 +28,7 @@ type Event struct {
 	Buffer  int
 	NoCopy  bool
 	Shared  bool
+	NoAsync bool
 	Upgrade func(conn Conn) (Conn, error)
 	Handle  func(req []byte) (res []byte)
 }

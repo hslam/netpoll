@@ -37,8 +37,8 @@ func (l *Listener) Serve() (err error) {
 	}
 	if l.Event == nil {
 		return errors.New("event is nil")
-	} else if l.Event.Upgrade == nil && l.Event.Handle == nil {
-		return errors.New("need Upgrade or Handle")
+	} else if l.Event.Handle == nil {
+		return errors.New("Handle is nil")
 	}
 	if l.Event.Buffer < 1 {
 		l.Event.Buffer = 0x10000
@@ -85,7 +85,7 @@ func (l *Listener) Serve() (err error) {
 			jobs:     make(chan *job),
 			tasks:    numCPU * 4,
 		}
-		if l.Event.Shared {
+		if l.Event.Shared || l.Event.NoAsync {
 			w.buf = make([]byte, l.Event.Buffer)
 		}
 		w.poll.Register(l.fd)
@@ -153,7 +153,7 @@ func (w *worker) task() {
 func (w *worker) run(wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer w.Close()
-	if w.async && w.handle != nil {
+	if w.async && !w.listener.Event.NoAsync {
 		for i := 0; i < w.tasks; i++ {
 			go w.task()
 		}
@@ -227,7 +227,7 @@ func (w *worker) accept() (err error) {
 			}
 		}
 		c := &conn{w: w, fd: nfd, raddr: raddr, laddr: w.listener.Listener.Addr()}
-		if !w.listener.Event.Shared {
+		if !w.listener.Event.Shared && !w.listener.Event.NoAsync {
 			c.buf = make([]byte, w.listener.Event.Buffer)
 		}
 		if w.listener.Event.Upgrade != nil {
@@ -269,7 +269,7 @@ func (w *worker) read(c *conn) error {
 	var n int
 	var err error
 	var buf []byte
-	if w.listener.Event.Shared {
+	if w.listener.Event.Shared || w.listener.Event.NoAsync {
 		buf = w.buf
 	} else {
 		buf = c.buf
@@ -289,17 +289,21 @@ func (w *worker) read(c *conn) error {
 		return nil
 	}
 	req := buf[:n]
-	if w.listener.Event.Shared || !w.listener.Event.NoCopy {
-		req = make([]byte, n)
-		copy(req, buf[:n])
-	}
-	if w.async {
+	if w.async && !w.listener.Event.NoAsync {
+		if w.listener.Event.Shared || !w.listener.Event.NoCopy {
+			req = make([]byte, n)
+			copy(req, buf[:n])
+		}
 		select {
 		case w.jobs <- &job{c, req}:
 		default:
 			go w.do(c, req)
 		}
 	} else {
+		if !w.listener.Event.NoCopy {
+			req = make([]byte, n)
+			copy(req, buf[:n])
+		}
 		w.do(c, req)
 	}
 	return nil
