@@ -129,6 +129,7 @@ type worker struct {
 	conns    map[int]*conn
 	poll     *Poll
 	events   []PollEvent
+	wg       sync.WaitGroup
 	buf      []byte
 	handle   func(req []byte) (res []byte)
 	async    bool
@@ -165,14 +166,25 @@ func (w *worker) run(wg *sync.WaitGroup) {
 	var err error
 	for err == nil {
 		n, err = w.poll.Wait(w.events)
-		for i := 0; i < n; i++ {
-			w.serve(w.events[i])
+		if w.async {
+			for i := 0; i < n; i++ {
+				w.wg.Add(1)
+				go w.serve(w.events[i])
+			}
+			w.wg.Wait()
+		} else {
+			for i := 0; i < n; i++ {
+				w.serve(w.events[i])
+			}
 		}
 		runtime.Gosched()
 	}
 }
 
 func (w *worker) serve(ev PollEvent) error {
+	if w.async {
+		defer w.wg.Done()
+	}
 	fd := ev.Fd
 	if fd == 0 {
 		return nil
