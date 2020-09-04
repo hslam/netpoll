@@ -168,6 +168,7 @@ func (w *worker) run(wg *sync.WaitGroup) {
 		for i := 0; i < n; i++ {
 			w.serve(w.events[i])
 		}
+		runtime.Gosched()
 	}
 }
 
