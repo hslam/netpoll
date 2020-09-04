@@ -6,22 +6,13 @@ package poll
 import (
 	"errors"
 	"net"
-	"time"
 )
 
-type Conn interface {
-	Read(b []byte) (n int, err error)
-	Write(b []byte) (n int, err error)
+type Messages interface {
+	SetBatch(batch func() int)
+	ReadMessage() ([]byte, error)
+	WriteMessage([]byte) error
 	Close() error
-	LocalAddr() net.Addr
-	RemoteAddr() net.Addr
-	SetDeadline(t time.Time) error
-	SetReadDeadline(t time.Time) error
-	SetWriteDeadline(t time.Time) error
-}
-
-type Writer interface {
-	Write(p []byte) (n int, err error)
 }
 
 type Event struct {
@@ -29,7 +20,8 @@ type Event struct {
 	NoCopy  bool
 	Shared  bool
 	NoAsync bool
-	Upgrade func(conn Conn) (Conn, error)
+	Batch   func() int
+	Upgrade func(conn net.Conn) (net.Conn, Messages, error)
 	Handle  func(req []byte) (res []byte)
 }
 
@@ -55,33 +47,55 @@ func (l *listener) Serve() (err error) {
 		if err != nil {
 			continue
 		}
-		go func(c Conn) {
+		go func(c net.Conn) {
 			defer func() {
 				if e := recover(); e != nil {
 				}
 			}()
+			var messages Messages
 			if l.Event.Upgrade != nil {
-				if upgrade, err := l.Event.Upgrade(c); err != nil {
+				if upgrade, m, err := l.Event.Upgrade(c); err != nil {
 					return
-				} else if upgrade != nil && upgrade != c {
-					c = upgrade
+				} else {
+					if m != nil {
+						messages = m
+						if l.Event.Batch != nil {
+							messages.SetBatch(l.Event.Batch)
+						}
+					}
+					if upgrade != nil && upgrade != c {
+						c = upgrade
+					}
 				}
 			}
 			var n int
 			var err error
-			var buf = make([]byte, l.Event.Buffer)
-			for err == nil {
-				n, err = c.Read(buf)
-				if err != nil {
-					break
+			if messages != nil {
+				var req []byte
+				for err == nil {
+					req, err = messages.ReadMessage()
+					if err != nil {
+						break
+					}
+					res := l.Event.Handle(req)
+					err = messages.WriteMessage(res)
 				}
-				req := buf[:n]
-				if !l.Event.NoCopy {
-					req = make([]byte, n)
-					copy(req, buf[:n])
+				messages.Close()
+			} else {
+				var buf = make([]byte, l.Event.Buffer)
+				for err == nil {
+					n, err = c.Read(buf)
+					if err != nil {
+						break
+					}
+					req := buf[:n]
+					if !l.Event.NoCopy {
+						req = make([]byte, n)
+						copy(req, buf[:n])
+					}
+					res := l.Event.Handle(req)
+					n, err = c.Write(res)
 				}
-				res := l.Event.Handle(req)
-				n, err = c.Write(res)
 			}
 			c.Close()
 		}(conn)
