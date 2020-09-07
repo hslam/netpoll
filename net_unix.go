@@ -71,21 +71,6 @@ func (l *Listener) Serve() (err error) {
 		return err
 	}
 	l.poll.Register(l.fd)
-	go func(l *Listener) {
-		defer l.wg.Done()
-		var n int
-		var err error
-		var events = make([]PollEvent, 1)
-		for err == nil {
-			if n, err = l.poll.Wait(events); n > 0 {
-				if events[0].Fd == l.fd {
-					err = l.accept()
-				}
-				runtime.Gosched()
-			}
-		}
-
-	}(l)
 	for i := 0; i < int(l.syncWorkers)+numCPU; i++ {
 		p, err := Create()
 		if err != nil {
@@ -115,8 +100,16 @@ func (l *Listener) Serve() (err error) {
 			w.buf = make([]byte, l.Event.Buffer)
 		}
 		l.workers = append(l.workers, w)
-		l.wg.Add(1)
-		go w.run(&l.wg)
+	}
+	var n int
+	var events = make([]PollEvent, 1)
+	for err == nil {
+		if n, err = l.poll.Wait(events); n > 0 {
+			if events[0].Fd == l.fd {
+				err = l.accept()
+			}
+			runtime.Gosched()
+		}
 	}
 	l.wg.Wait()
 	return nil
@@ -154,6 +147,7 @@ func (l *Listener) accept() (err error) {
 		}
 	}
 	w := l.assignWorker()
+	w.Wake(&l.wg)
 	return w.register(&conn{w: w, fd: nfd, raddr: raddr, laddr: l.Listener.Addr()})
 }
 
@@ -182,6 +176,10 @@ func (l *Listener) leastConnectedWorker() (w *worker) {
 	return l.workers[index]
 }
 
+func (l *Listener) Close() error {
+	return l.poll.Close()
+}
+
 type worker struct {
 	index    int
 	listener *Listener
@@ -198,6 +196,9 @@ type worker struct {
 	jobs     chan *job
 	tasks    chan struct{}
 	done     chan struct{}
+	lock     sync.Mutex
+	running  bool
+	slept    int32
 	closed   int32
 }
 
@@ -222,10 +223,21 @@ func (w *worker) task(j *job) {
 		}
 	}
 }
-
+func (w *worker) Wake(wg *sync.WaitGroup) {
+	w.lock.Lock()
+	if !w.running {
+		w.running = true
+		w.done = make(chan struct{}, 1)
+		atomic.StoreInt32(&w.slept, 0)
+		w.lock.Unlock()
+		wg.Add(1)
+		go w.run(wg)
+	} else {
+		w.lock.Unlock()
+	}
+}
 func (w *worker) run(wg *sync.WaitGroup) {
 	defer wg.Done()
-	defer w.Close()
 	var n int
 	var err error
 	for err == nil {
@@ -240,6 +252,13 @@ func (w *worker) run(wg *sync.WaitGroup) {
 			for i := 0; i < n; i++ {
 				w.serve(w.events[i])
 			}
+		}
+		if atomic.LoadInt64(&w.count) == 0 {
+			w.lock.Lock()
+			w.Sleep()
+			w.running = false
+			w.lock.Unlock()
+			return
 		}
 		runtime.Gosched()
 	}
@@ -403,11 +422,17 @@ func (w *worker) decrease(c *conn) {
 	w.mu.Unlock()
 }
 
+func (w *worker) Sleep() {
+	if !atomic.CompareAndSwapInt32(&w.slept, 0, 1) {
+		return
+	}
+	close(w.done)
+}
+
 func (w *worker) Close() {
 	if !atomic.CompareAndSwapInt32(&w.closed, 0, 1) {
 		return
 	}
-	close(w.done)
 	close(w.tasks)
 	close(w.jobs)
 	w.conns = nil
