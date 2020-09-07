@@ -67,7 +67,7 @@ func (l *Listener) Serve() (err error) {
 		l.Listener.Close()
 		return err
 	}
-	l.syncWorkers = numCPU * 4
+	l.syncWorkers = 16
 	var wg sync.WaitGroup
 	for i := 0; i < l.syncWorkers+1; i++ {
 		p, err := Create()
