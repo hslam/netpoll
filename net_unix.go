@@ -85,7 +85,7 @@ func (l *Listener) Serve() (err error) {
 			async:    async,
 			done:     make(chan bool, 0x10),
 			jobs:     make(chan *job),
-			tasks:    numCPU,
+			tasks:    make(chan struct{}, numCPU),
 		}
 		if w.async {
 			w.pool = &sync.Pool{New: func() interface{} {
@@ -141,7 +141,7 @@ type worker struct {
 	handle   func(req []byte) (res []byte)
 	async    bool
 	jobs     chan *job
-	tasks    int
+	tasks    chan struct{}
 	done     chan bool
 }
 
@@ -150,11 +150,17 @@ type job struct {
 	req  []byte
 }
 
-func (w *worker) task() {
+func (w *worker) task(j *job) {
+	defer func() { <-w.tasks }()
 	for {
+		w.do(j.conn, j.req)
+		t := time.NewTimer(time.Second)
+		runtime.Gosched()
 		select {
-		case j := <-w.jobs:
-			w.do(j.conn, j.req)
+		case j = <-w.jobs:
+			t.Stop()
+		case <-t.C:
+			return
 		case <-w.done:
 			return
 		}
@@ -164,11 +170,6 @@ func (w *worker) task() {
 func (w *worker) run(wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer w.Close()
-	if w.async {
-		for i := 0; i < w.tasks; i++ {
-			go w.task()
-		}
-	}
 	var n int
 	var err error
 	for err == nil {
@@ -338,6 +339,8 @@ func (w *worker) read(c *conn) error {
 			copy(req, msg)
 			select {
 			case w.jobs <- &job{c, req}:
+			case w.tasks <- struct{}{}:
+				go w.task(&job{c, req})
 			default:
 				go w.do(c, req)
 			}
