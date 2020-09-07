@@ -24,11 +24,12 @@ func Serve(lis net.Listener, event *Event) error {
 }
 
 type Listener struct {
-	Listener net.Listener
-	Event    *Event
-	file     *os.File
-	fd       int
-	workers  []*worker
+	Listener    net.Listener
+	Event       *Event
+	file        *os.File
+	fd          int
+	workers     []*worker
+	syncWorkers int
 }
 
 func (l *Listener) Serve() (err error) {
@@ -66,14 +67,15 @@ func (l *Listener) Serve() (err error) {
 		l.Listener.Close()
 		return err
 	}
+	l.syncWorkers = numCPU * 4
 	var wg sync.WaitGroup
-	for i := 0; i < numCPU*4+1; i++ {
+	for i := 0; i < l.syncWorkers+1; i++ {
 		p, err := Create()
 		if err != nil {
 			return err
 		}
 		var async bool
-		if i >= numCPU*4 {
+		if i >= l.syncWorkers {
 			async = true
 		}
 		w := &worker{
@@ -101,9 +103,9 @@ func (l *Listener) Serve() (err error) {
 }
 
 func (l *Listener) min() int64 {
-	min := l.workers[numCPU*4].count
-	if len(l.workers) > numCPU*4 {
-		for i := numCPU*4 + 1; i < len(l.workers); i++ {
+	min := l.workers[l.syncWorkers].count
+	if len(l.workers) > l.syncWorkers {
+		for i := l.syncWorkers + 1; i < len(l.workers); i++ {
 			if l.workers[i].count < min {
 				min = l.workers[i].count
 			}
@@ -113,7 +115,10 @@ func (l *Listener) min() int64 {
 }
 
 func (l *Listener) idle() bool {
-	for i := 0; i < numCPU*4; i++ {
+	if l.syncWorkers < 1 {
+		return false
+	}
+	for i := 0; i < l.syncWorkers; i++ {
 		if l.workers[i].count < 1 {
 			return true
 		}
