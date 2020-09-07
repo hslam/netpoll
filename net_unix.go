@@ -69,13 +69,13 @@ func (l *Listener) Serve() (err error) {
 	}
 	l.syncWorkers = 16
 	var wg sync.WaitGroup
-	for i := 0; i < l.syncWorkers+1; i++ {
+	for i := 0; i < l.syncWorkers+numCPU; i++ {
 		p, err := Create()
 		if err != nil {
 			return err
 		}
 		var async bool
-		if i >= l.syncWorkers {
+		if i >= l.syncWorkers && !l.Event.NoAsync {
 			async = true
 		}
 		w := &worker{
@@ -88,7 +88,7 @@ func (l *Listener) Serve() (err error) {
 			async:    async,
 			done:     make(chan bool, 0x10),
 			jobs:     make(chan *job),
-			tasks:    numCPU * 4,
+			tasks:    numCPU,
 		}
 		if l.Event.Shared {
 			w.buf = make([]byte, l.Event.Buffer)
@@ -162,7 +162,7 @@ func (w *worker) task() {
 func (w *worker) run(wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer w.Close()
-	if w.async && !w.listener.Event.NoAsync {
+	if w.async {
 		for i := 0; i < w.tasks; i++ {
 			go w.task()
 		}
@@ -171,7 +171,7 @@ func (w *worker) run(wg *sync.WaitGroup) {
 	var err error
 	for err == nil {
 		n, err = w.poll.Wait(w.events)
-		if w.async && !w.listener.Event.NoAsync {
+		if w.async {
 			for i := 0; i < n; i++ {
 				w.wg.Add(1)
 				go w.serve(w.events[i])
@@ -218,8 +218,8 @@ func (w *worker) serve(ev PollEvent) error {
 }
 
 func (w *worker) accept() (err error) {
-	if w.listener.idle() && !w.async && atomic.LoadInt64(&w.count) < 1 ||
-		!w.listener.idle() && w.async && atomic.LoadInt64(&w.count) <= w.listener.min() {
+	if w.listener.idle() && w.index < w.listener.syncWorkers && atomic.LoadInt64(&w.count) < 1 ||
+		!w.listener.idle() && w.index >= w.listener.syncWorkers && atomic.LoadInt64(&w.count) <= w.listener.min() {
 		nfd, sa, err := syscall.Accept(w.listener.fd)
 		if err != nil {
 			if err == syscall.EAGAIN {
@@ -330,7 +330,7 @@ func (w *worker) read(c *conn) error {
 			msg = buf[:n]
 		}
 		req = msg
-		if w.async && !w.listener.Event.NoAsync {
+		if w.async {
 			if w.listener.Event.Shared || !w.listener.Event.NoCopy {
 				req = make([]byte, n)
 				copy(req, msg)
