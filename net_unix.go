@@ -28,8 +28,10 @@ type Listener struct {
 	Event       *Event
 	file        *os.File
 	fd          int
+	poll        *Poll
 	workers     []*worker
-	syncWorkers int
+	syncWorkers uint
+	wg          sync.WaitGroup
 }
 
 func (l *Listener) Serve() (err error) {
@@ -65,14 +67,32 @@ func (l *Listener) Serve() (err error) {
 		return err
 	}
 	l.syncWorkers = 16
-	var wg sync.WaitGroup
-	for i := 0; i < l.syncWorkers+numCPU; i++ {
+	if l.poll, err = Create(); err != nil {
+		return err
+	}
+	l.poll.Register(l.fd)
+	go func(l *Listener) {
+		defer l.wg.Done()
+		var n int
+		var err error
+		var events = make([]PollEvent, 1)
+		for err == nil {
+			if n, err = l.poll.Wait(events); n > 0 {
+				if events[0].Fd == l.fd {
+					err = l.accept()
+				}
+				runtime.Gosched()
+			}
+		}
+
+	}(l)
+	for i := 0; i < int(l.syncWorkers)+numCPU; i++ {
 		p, err := Create()
 		if err != nil {
 			return err
 		}
 		var async bool
-		if i >= l.syncWorkers && !l.Event.NoAsync {
+		if i >= int(l.syncWorkers) && !l.Event.NoAsync {
 			async = true
 		}
 		w := &worker{
@@ -83,7 +103,7 @@ func (l *Listener) Serve() (err error) {
 			events:   make([]PollEvent, 0x400),
 			handle:   l.Event.Handle,
 			async:    async,
-			done:     make(chan bool, 0x10),
+			done:     make(chan struct{}, 1),
 			jobs:     make(chan *job),
 			tasks:    make(chan struct{}, numCPU),
 		}
@@ -94,37 +114,72 @@ func (l *Listener) Serve() (err error) {
 		} else {
 			w.buf = make([]byte, l.Event.Buffer)
 		}
-		w.poll.Register(l.fd)
 		l.workers = append(l.workers, w)
-		wg.Add(1)
-		go w.run(&wg)
+		l.wg.Add(1)
+		go w.run(&l.wg)
 	}
-	wg.Wait()
+	l.wg.Wait()
 	return nil
 }
 
-func (l *Listener) min() int64 {
-	min := l.workers[l.syncWorkers].count
-	if len(l.workers) > l.syncWorkers {
-		for i := l.syncWorkers + 1; i < len(l.workers); i++ {
-			if l.workers[i].count < min {
-				min = l.workers[i].count
+func (l *Listener) accept() (err error) {
+	nfd, sa, err := syscall.Accept(l.fd)
+	if err != nil {
+		if err == syscall.EAGAIN {
+			return nil
+		}
+		return err
+	}
+	if err := syscall.SetNonblock(nfd, true); err != nil {
+		return err
+	}
+	var raddr net.Addr
+	switch sockaddr := sa.(type) {
+	case *syscall.SockaddrUnix:
+		raddr = &net.UnixAddr{Net: "unix", Name: sockaddr.Name}
+	case *syscall.SockaddrInet4:
+		raddr = &net.TCPAddr{
+			IP:   append([]byte{}, sockaddr.Addr[:]...),
+			Port: sockaddr.Port,
+		}
+	case *syscall.SockaddrInet6:
+		var zone string
+		if ifi, err := net.InterfaceByIndex(int(sockaddr.ZoneId)); err == nil {
+			zone = ifi.Name
+		}
+		raddr = &net.TCPAddr{
+			IP:   append([]byte{}, sockaddr.Addr[:]...),
+			Port: sockaddr.Port,
+			Zone: zone,
+		}
+	}
+	w := l.assignWorker()
+	return w.register(&conn{w: w, fd: nfd, raddr: raddr, laddr: l.Listener.Addr()})
+}
+
+func (l *Listener) assignWorker() (w *worker) {
+	if l.syncWorkers > 0 {
+		for i := 0; i < int(l.syncWorkers); i++ {
+			if l.workers[i].count < 1 {
+				return l.workers[i]
 			}
 		}
 	}
-	return min
+	return l.leastConnectedWorker()
 }
 
-func (l *Listener) idle() bool {
-	if l.syncWorkers < 1 {
-		return false
-	}
-	for i := 0; i < l.syncWorkers; i++ {
-		if l.workers[i].count < 1 {
-			return true
+func (l *Listener) leastConnectedWorker() (w *worker) {
+	min := l.workers[l.syncWorkers].count
+	index := int(l.syncWorkers)
+	if len(l.workers) > int(l.syncWorkers) {
+		for i := int(l.syncWorkers) + 1; i < len(l.workers); i++ {
+			if l.workers[i].count < min {
+				min = l.workers[i].count
+				index = i
+			}
 		}
 	}
-	return false
+	return l.workers[index]
 }
 
 type worker struct {
@@ -142,7 +197,8 @@ type worker struct {
 	async    bool
 	jobs     chan *job
 	tasks    chan struct{}
-	done     chan bool
+	done     chan struct{}
+	closed   int32
 }
 
 type job struct {
@@ -197,10 +253,6 @@ func (w *worker) serve(ev PollEvent) error {
 	if fd == 0 {
 		return nil
 	}
-	if fd == w.listener.fd {
-		w.accept()
-		return nil
-	}
 	w.mu.Lock()
 	if c, ok := w.conns[fd]; !ok {
 		w.mu.Unlock()
@@ -218,75 +270,6 @@ func (w *worker) serve(ev PollEvent) error {
 		}
 		return nil
 	}
-}
-
-func (w *worker) accept() (err error) {
-	if w.listener.idle() && w.index < w.listener.syncWorkers && atomic.LoadInt64(&w.count) < 1 ||
-		!w.listener.idle() && w.index >= w.listener.syncWorkers && atomic.LoadInt64(&w.count) <= w.listener.min() {
-		nfd, sa, err := syscall.Accept(w.listener.fd)
-		if err != nil {
-			if err == syscall.EAGAIN {
-				return nil
-			}
-			return err
-		}
-		if err := syscall.SetNonblock(nfd, true); err != nil {
-			return err
-		}
-		var raddr net.Addr
-		switch sockaddr := sa.(type) {
-		case *syscall.SockaddrUnix:
-			raddr = &net.UnixAddr{Net: "unix", Name: sockaddr.Name}
-		case *syscall.SockaddrInet4:
-			raddr = &net.TCPAddr{
-				IP:   append([]byte{}, sockaddr.Addr[:]...),
-				Port: sockaddr.Port,
-			}
-		case *syscall.SockaddrInet6:
-			var zone string
-			if ifi, err := net.InterfaceByIndex(int(sockaddr.ZoneId)); err == nil {
-				zone = ifi.Name
-			}
-			raddr = &net.TCPAddr{
-				IP:   append([]byte{}, sockaddr.Addr[:]...),
-				Port: sockaddr.Port,
-				Zone: zone,
-			}
-		}
-		c := &conn{w: w, fd: nfd, raddr: raddr, laddr: w.listener.Listener.Addr()}
-		w.increase(c)
-		if w.listener.Event.Upgrade != nil {
-			go func(w *worker, c *conn) {
-				defer func() {
-					if e := recover(); e != nil {
-					}
-				}()
-				if err := syscall.SetNonblock(c.fd, false); err != nil {
-					return
-				}
-				if upgrade, m, err := w.listener.Event.Upgrade(c); err != nil {
-					return
-				} else {
-					if m != nil {
-						c.messages = m
-						if w.listener.Event.Batch != nil {
-							c.messages.SetBatch(w.listener.Event.Batch)
-						}
-					}
-					if upgrade != nil && upgrade != c {
-						c.upgrade = upgrade
-					}
-				}
-				if err := syscall.SetNonblock(c.fd, true); err != nil {
-					return
-				}
-				atomic.StoreInt32(&c.ready, 1)
-			}(w, c)
-			return nil
-		}
-		atomic.StoreInt32(&c.ready, 1)
-	}
-	return nil
 }
 
 func (w *worker) write(c *conn) error {
@@ -369,6 +352,41 @@ func (w *worker) do(c *conn, req []byte) {
 	}
 }
 
+func (w *worker) register(c *conn) error {
+	w.increase(c)
+	if w.listener.Event.Upgrade != nil {
+		go func(w *worker, c *conn) {
+			defer func() {
+				if e := recover(); e != nil {
+				}
+			}()
+			if err := syscall.SetNonblock(c.fd, false); err != nil {
+				return
+			}
+			if upgrade, m, err := w.listener.Event.Upgrade(c); err != nil {
+				return
+			} else {
+				if m != nil {
+					c.messages = m
+					if w.listener.Event.Batch != nil {
+						c.messages.SetBatch(w.listener.Event.Batch)
+					}
+				}
+				if upgrade != nil && upgrade != c {
+					c.upgrade = upgrade
+				}
+			}
+			if err := syscall.SetNonblock(c.fd, true); err != nil {
+				return
+			}
+			atomic.StoreInt32(&c.ready, 1)
+		}(w, c)
+		return nil
+	}
+	atomic.StoreInt32(&c.ready, 1)
+	return nil
+}
+
 func (w *worker) increase(c *conn) {
 	w.mu.Lock()
 	w.conns[c.fd] = c
@@ -386,10 +404,16 @@ func (w *worker) decrease(c *conn) {
 }
 
 func (w *worker) Close() {
-	if w.jobs != nil {
-		close(w.jobs)
-		w.jobs = nil
+	if !atomic.CompareAndSwapInt32(&w.closed, 0, 1) {
+		return
 	}
+	close(w.done)
+	close(w.tasks)
+	close(w.jobs)
+	w.conns = nil
+	w.events = nil
+	w.pool = nil
+	w.buf = nil
 	w.poll.Close()
 }
 
