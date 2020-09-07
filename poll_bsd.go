@@ -6,13 +6,14 @@
 package poll
 
 import (
+	"sync"
 	"syscall"
 )
 
 type Poll struct {
-	fd      int
-	events  []syscall.Kevent_t
-	changes []syscall.Kevent_t
+	fd     int
+	events []syscall.Kevent_t
+	pool   *sync.Pool
 }
 
 func Create() (*Poll, error) {
@@ -21,28 +22,36 @@ func Create() (*Poll, error) {
 		return nil, err
 	}
 	return &Poll{
-		fd:      fd,
-		events:  make([]syscall.Kevent_t, 1024),
-		changes: []syscall.Kevent_t{{Filter: syscall.EVFILT_READ}, {Filter: syscall.EVFILT_WRITE}},
+		fd:     fd,
+		events: make([]syscall.Kevent_t, 1024),
+		pool: &sync.Pool{New: func() interface{} {
+			return []syscall.Kevent_t{{Filter: syscall.EVFILT_READ}, {Filter: syscall.EVFILT_WRITE}}
+		}},
 	}, nil
 }
 
 func (p *Poll) Register(fd int) (err error) {
-	p.changes[0].Ident, p.changes[0].Flags = uint64(fd), syscall.EV_ADD
-	_, err = syscall.Kevent(p.fd, p.changes[:1], nil, nil)
+	changes := p.pool.Get().([]syscall.Kevent_t)
+	defer p.pool.Put(changes)
+	changes[0].Ident, changes[0].Flags = uint64(fd), syscall.EV_ADD
+	_, err = syscall.Kevent(p.fd, changes[:1], nil, nil)
 	return
 }
 
 func (p *Poll) Write(fd int) (err error) {
-	p.changes[1].Ident, p.changes[1].Flags = uint64(fd), syscall.EV_ADD
-	_, err = syscall.Kevent(p.fd, p.changes[1:], nil, nil)
+	changes := p.pool.Get().([]syscall.Kevent_t)
+	defer p.pool.Put(changes)
+	changes[1].Ident, changes[1].Flags = uint64(fd), syscall.EV_ADD
+	_, err = syscall.Kevent(p.fd, changes[1:], nil, nil)
 	return
 }
 
 func (p *Poll) Unregister(fd int) (err error) {
-	p.changes[0].Ident, p.changes[0].Flags = uint64(fd), syscall.EV_DELETE
-	p.changes[1].Ident, p.changes[1].Flags = uint64(fd), syscall.EV_DELETE
-	_, err = syscall.Kevent(p.fd, p.changes, nil, nil)
+	changes := p.pool.Get().([]syscall.Kevent_t)
+	defer p.pool.Put(changes)
+	changes[0].Ident, changes[0].Flags = uint64(fd), syscall.EV_DELETE
+	changes[1].Ident, changes[1].Flags = uint64(fd), syscall.EV_DELETE
+	_, err = syscall.Kevent(p.fd, changes, nil, nil)
 	return
 }
 
@@ -64,8 +73,10 @@ func (p *Poll) Wait(events []PollEvent) (n int, err error) {
 			events[i].Mode = READ
 		case syscall.EVFILT_WRITE:
 			events[i].Mode = WRITE
-			p.changes[1].Ident, p.changes[1].Flags = ev.Ident, syscall.EV_DELETE
-			syscall.Kevent(p.fd, p.changes[1:], nil, nil)
+			changes := p.pool.Get().([]syscall.Kevent_t)
+			changes[1].Ident, changes[1].Flags = ev.Ident, syscall.EV_DELETE
+			syscall.Kevent(p.fd, changes[1:], nil, nil)
+			p.pool.Put(changes)
 		}
 	}
 	return
