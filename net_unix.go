@@ -32,6 +32,7 @@ type Listener struct {
 	workers     []*worker
 	syncWorkers uint
 	wg          sync.WaitGroup
+	closed      int32
 }
 
 func (l *Listener) Serve() (err error) {
@@ -177,6 +178,18 @@ func (l *Listener) leastConnectedWorker() (w *worker) {
 }
 
 func (l *Listener) Close() error {
+	if !atomic.CompareAndSwapInt32(&l.closed, 0, 1) {
+		return nil
+	}
+	for i := 0; i < len(l.workers); i++ {
+		l.workers[i].Close()
+	}
+	if err := l.Listener.Close(); err != nil {
+		return err
+	}
+	if err := l.file.Close(); err != nil {
+		return err
+	}
 	return l.poll.Close()
 }
 
@@ -325,7 +338,7 @@ func (w *worker) read(c *conn) error {
 			}
 		}
 		if n == 0 || err != nil {
-			if err == syscall.EAGAIN || c.closed {
+			if err == syscall.EAGAIN || atomic.LoadInt32(&c.closed) > 0 {
 				return nil
 			}
 			w.decrease(c)
@@ -433,12 +446,12 @@ func (w *worker) Close() {
 	if !atomic.CompareAndSwapInt32(&w.closed, 0, 1) {
 		return
 	}
-	close(w.tasks)
-	close(w.jobs)
-	w.conns = nil
-	w.events = nil
-	w.pool = nil
-	w.buf = nil
+	w.mu.Lock()
+	for _, c := range w.conns {
+		c.Close()
+	}
+	w.mu.Unlock()
+	w.Sleep()
 	w.poll.Close()
 }
 
@@ -453,7 +466,7 @@ type conn struct {
 	upgrade  net.Conn
 	messages Messages
 	ready    int32
-	closed   bool
+	closed   int32
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
@@ -520,10 +533,9 @@ func (c *conn) flush() (retain int, err error) {
 }
 
 func (c *conn) Close() (err error) {
-	if c.closed {
-		return nil
+	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+		return
 	}
-	c.closed = true
 	return syscall.Close(c.fd)
 }
 func (c *conn) LocalAddr() net.Addr {
