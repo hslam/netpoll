@@ -6,13 +6,14 @@
 package poll
 
 import (
+	"sync"
 	"syscall"
 )
 
 type Poll struct {
 	fd     int
 	events []syscall.EpollEvent
-	event  syscall.EpollEvent
+	pool   *sync.Pool
 }
 
 func Create() (*Poll, error) {
@@ -23,23 +24,31 @@ func Create() (*Poll, error) {
 	return &Poll{
 		fd:     fd,
 		events: make([]syscall.EpollEvent, 1024),
-		event:  syscall.EpollEvent{},
+		pool: &sync.Pool{New: func() interface{} {
+			return syscall.EpollEvent{}
+		}},
 	}, nil
 }
 
 func (p *Poll) Register(fd int) (err error) {
-	p.event.Fd, p.event.Events = int32(fd), syscall.EPOLLIN
-	return syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_ADD, fd, &p.event)
+	event := p.pool.Get().(syscall.EpollEvent)
+	defer p.pool.Put(event)
+	event.Fd, event.Events = int32(fd), syscall.EPOLLIN
+	return syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_ADD, fd, &event)
 }
 
 func (p *Poll) Write(fd int) (err error) {
-	p.event.Fd, p.event.Events = int32(fd), syscall.EPOLLIN|syscall.EPOLLOUT
-	return syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_MOD, fd, &p.event)
+	event := p.pool.Get().(syscall.EpollEvent)
+	defer p.pool.Put(event)
+	event.Fd, event.Events = int32(fd), syscall.EPOLLIN|syscall.EPOLLOUT
+	return syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_MOD, fd, &event)
 }
 
 func (p *Poll) Unregister(fd int) (err error) {
-	p.event.Fd, p.event.Events = int32(fd), syscall.EPOLLIN|syscall.EPOLLOUT
-	return syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_DEL, fd, &p.event)
+	event := p.pool.Get().(syscall.EpollEvent)
+	defer p.pool.Put(event)
+	event.Fd, event.Events = int32(fd), syscall.EPOLLIN|syscall.EPOLLOUT
+	return syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_DEL, fd, &event)
 }
 
 func (p *Poll) Wait(events []PollEvent) (n int, err error) {
@@ -59,8 +68,10 @@ func (p *Poll) Wait(events []PollEvent) (n int, err error) {
 			events[i].Mode = READ
 		} else if ev.Events&syscall.EPOLLOUT != 0 {
 			events[i].Mode = WRITE
-			p.event.Fd, p.event.Events = ev.Fd, syscall.EPOLLIN
-			syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_MOD, int(ev.Fd), &p.event)
+			event := p.pool.Get().(syscall.EpollEvent)
+			event.Fd, event.Events = ev.Fd, syscall.EPOLLIN
+			syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_MOD, int(ev.Fd), &event)
+			p.pool.Put(event)
 		}
 	}
 	return
