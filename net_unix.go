@@ -427,7 +427,12 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	for retain > 0 {
 		n, err = syscall.Write(c.fd, b[len(b)-retain:])
 		if n < 1 || err != nil {
-			return len(b) - retain, err
+			if atomic.LoadInt32(&c.ready) == 0 {
+				return len(b) - retain, err
+			} else {
+				c.write(b[len(b)-retain:])
+				break
+			}
 		}
 		retain -= n
 	}
@@ -439,8 +444,6 @@ func (c *conn) write(b []byte) (n int, err error) {
 		return 0, nil
 	}
 	defer c.w.poll.Write(c.fd)
-	c.wMu.Lock()
-	defer c.wMu.Unlock()
 	c.send = append(c.send, b...)
 	return len(b), nil
 }
