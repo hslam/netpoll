@@ -171,7 +171,7 @@ func (w *worker) run(wg *sync.WaitGroup) {
 	var err error
 	for err == nil {
 		n, err = w.poll.Wait(w.events)
-		if w.async {
+		if w.async && !w.listener.Event.NoAsync {
 			for i := 0; i < n; i++ {
 				w.wg.Add(1)
 				go w.serve(w.events[i])
@@ -389,15 +389,6 @@ func (w *worker) Close() {
 	w.poll.Close()
 }
 
-type writer struct {
-	c *conn
-}
-
-func (w *writer) Write(b []byte) (n int, err error) {
-	defer w.c.w.poll.Write(w.c.fd)
-	return w.c.write(b)
-}
-
 type conn struct {
 	w        *worker
 	rMu      sync.Mutex
@@ -447,6 +438,7 @@ func (c *conn) write(b []byte) (n int, err error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
+	defer c.w.poll.Write(c.fd)
 	c.wMu.Lock()
 	defer c.wMu.Unlock()
 	c.send = append(c.send, b...)
