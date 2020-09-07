@@ -44,9 +44,6 @@ func (l *Listener) Serve() (err error) {
 	if l.Event.Buffer < 1 {
 		l.Event.Buffer = 0x10000
 	}
-	if l.Event.NoAsync {
-		l.Event.Shared = true
-	}
 	switch netListener := l.Listener.(type) {
 	case *net.TCPListener:
 		if l.file, err = netListener.File(); err != nil {
@@ -90,7 +87,11 @@ func (l *Listener) Serve() (err error) {
 			jobs:     make(chan *job),
 			tasks:    numCPU,
 		}
-		if l.Event.Shared {
+		if w.async {
+			w.pool = &sync.Pool{New: func() interface{} {
+				return make([]byte, l.Event.Buffer)
+			}}
+		} else {
 			w.buf = make([]byte, l.Event.Buffer)
 		}
 		w.poll.Register(l.fd)
@@ -135,6 +136,7 @@ type worker struct {
 	poll     *Poll
 	events   []PollEvent
 	wg       sync.WaitGroup
+	pool     *sync.Pool
 	buf      []byte
 	handle   func(req []byte) (res []byte)
 	async    bool
@@ -251,9 +253,6 @@ func (w *worker) accept() (err error) {
 			}
 		}
 		c := &conn{w: w, fd: nfd, raddr: raddr, laddr: w.listener.Listener.Addr()}
-		if !w.listener.Event.Shared {
-			c.buf = make([]byte, w.listener.Event.Buffer)
-		}
 		w.increase(c)
 		if w.listener.Event.Upgrade != nil {
 			go func(w *worker, c *conn) {
@@ -305,18 +304,22 @@ func (w *worker) read(c *conn) error {
 		var buf []byte
 		var msg []byte
 		var req []byte
-		if w.listener.Event.Shared {
-			buf = w.buf
-		} else {
-			buf = c.buf
-		}
 		if c.messages != nil {
 			msg, err = c.messages.ReadMessage()
 			n = len(msg)
-		} else if c.upgrade != nil {
-			n, err = c.upgrade.Read(buf)
 		} else {
-			n, err = c.Read(buf)
+			if w.async {
+				buf = w.pool.Get().([]byte)
+				buf = buf[:cap(buf)]
+				defer w.pool.Put(buf)
+			} else {
+				buf = w.buf
+			}
+			if c.upgrade != nil {
+				n, err = c.upgrade.Read(buf)
+			} else {
+				n, err = c.Read(buf)
+			}
 		}
 		if n == 0 || err != nil {
 			if err == syscall.EAGAIN || c.closed {
@@ -331,10 +334,8 @@ func (w *worker) read(c *conn) error {
 		}
 		req = msg
 		if w.async {
-			if w.listener.Event.Shared || !w.listener.Event.NoCopy {
-				req = make([]byte, n)
-				copy(req, msg)
-			}
+			req = make([]byte, n)
+			copy(req, msg)
 			select {
 			case w.jobs <- &job{c, req}:
 			default:
@@ -394,7 +395,6 @@ type conn struct {
 	rMu      sync.Mutex
 	wMu      sync.Mutex
 	fd       int
-	buf      []byte
 	send     []byte
 	laddr    net.Addr
 	raddr    net.Addr

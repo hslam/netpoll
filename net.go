@@ -18,7 +18,6 @@ type Messages interface {
 type Event struct {
 	Buffer  int
 	NoCopy  bool
-	Shared  bool
 	NoAsync bool
 	Batch   func() int
 	Upgrade func(conn net.Conn) (net.Conn, Messages, error)
