@@ -201,7 +201,6 @@ type worker struct {
 	conns    map[int]*conn
 	poll     *Poll
 	events   []PollEvent
-	wg       sync.WaitGroup
 	pool     *sync.Pool
 	buf      []byte
 	handle   func(req []byte) (res []byte)
@@ -250,14 +249,10 @@ func (w *worker) run(wg *sync.WaitGroup) {
 	var err error
 	for err == nil {
 		n, err = w.poll.Wait(w.events)
-		if w.async {
-			for i := 0; i < n; i++ {
-				w.wg.Add(1)
+		for i := 0; i < n; i++ {
+			if w.async {
 				go w.serve(w.events[i])
-			}
-			w.wg.Wait()
-		} else {
-			for i := 0; i < n; i++ {
+			} else {
 				w.serve(w.events[i])
 			}
 		}
@@ -273,9 +268,6 @@ func (w *worker) run(wg *sync.WaitGroup) {
 }
 
 func (w *worker) serve(ev PollEvent) error {
-	if w.async {
-		defer w.wg.Done()
-	}
 	fd := ev.Fd
 	if fd == 0 {
 		return nil
@@ -300,7 +292,10 @@ func (w *worker) serve(ev PollEvent) error {
 }
 
 func (w *worker) write(c *conn) error {
-	if retain, err := c.flush(); err != nil {
+	c.sending.Lock()
+	retain, err := c.flush()
+	c.sending.Unlock()
+	if err != nil {
 		return err
 	} else if retain > 0 {
 		w.poll.Write(c.fd)
@@ -316,7 +311,9 @@ func (w *worker) read(c *conn) error {
 		var msg []byte
 		var req []byte
 		if c.messages != nil {
+			c.reading.Lock()
 			msg, err = c.messages.ReadMessage()
+			c.reading.Unlock()
 			n = len(msg)
 		} else {
 			if w.async {
@@ -326,11 +323,13 @@ func (w *worker) read(c *conn) error {
 			} else {
 				buf = w.buf
 			}
+			c.reading.Lock()
 			if c.upgrade != nil {
 				n, err = c.upgrade.Read(buf)
 			} else {
 				n, err = c.Read(buf)
 			}
+			c.reading.Unlock()
 		}
 		if n == 0 || err != nil {
 			if err == syscall.EAGAIN || atomic.LoadInt32(&c.closed) > 0 {
@@ -373,14 +372,12 @@ func (w *worker) read(c *conn) error {
 
 func (w *worker) do(c *conn, req []byte) {
 	res := w.handle(req)
+	c.sending.Lock()
+	defer c.sending.Unlock()
 	if c.messages != nil {
-		c.sending.Lock()
 		c.messages.WriteMessage(res)
-		c.sending.Unlock()
 	} else if c.upgrade != nil {
-		c.sending.Lock()
 		c.upgrade.Write(res)
-		c.sending.Unlock()
 	} else {
 		c.Write(res)
 	}
@@ -462,9 +459,8 @@ func (w *worker) Close() {
 
 type conn struct {
 	w        *worker
+	reading  sync.Mutex
 	sending  sync.Mutex
-	rMu      sync.Mutex
-	wMu      sync.Mutex
 	fd       int
 	send     []byte
 	laddr    net.Addr
@@ -477,8 +473,6 @@ type conn struct {
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
-	c.rMu.Lock()
-	defer c.rMu.Unlock()
 	n, err = syscall.Read(c.fd, b)
 	if n == 0 {
 		err = syscall.EINVAL
@@ -493,8 +487,12 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
-	c.wMu.Lock()
-	defer c.wMu.Unlock()
+	if atomic.LoadInt32(&c.ready) == 1 {
+		if retain, err := c.flush(); err != nil || retain > 0 {
+			c.write(b)
+			return len(b), err
+		}
+	}
 	var retain = len(b)
 	for retain > 0 {
 		n, err = syscall.Write(c.fd, b[len(b)-retain:])
@@ -521,8 +519,6 @@ func (c *conn) write(b []byte) (n int, err error) {
 }
 
 func (c *conn) flush() (retain int, err error) {
-	c.wMu.Lock()
-	defer c.wMu.Unlock()
 	if len(c.send) == 0 {
 		return 0, nil
 	}
