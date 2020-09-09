@@ -250,8 +250,8 @@ func (w *worker) run(wg *sync.WaitGroup) {
 	for err == nil {
 		n, err = w.poll.Wait(w.events)
 		for i := range w.events[:n] {
+			ev := w.events[i]
 			if w.async {
-				ev := w.events[i]
 				job := func() {
 					w.serve(ev)
 				}
@@ -263,7 +263,7 @@ func (w *worker) run(wg *sync.WaitGroup) {
 					go job()
 				}
 			} else {
-				w.serve(w.events[i])
+				w.serve(ev)
 			}
 		}
 		if atomic.LoadInt64(&w.count) < 1 {
