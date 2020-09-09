@@ -391,6 +391,9 @@ func (w *worker) do(c *conn, req []byte) {
 func (w *worker) register(c *conn) error {
 	w.increase(c)
 	if w.listener.Event.Upgrade != nil {
+		if !atomic.CompareAndSwapInt32(&c.upgraded, 0, 1) {
+			return nil
+		}
 		go func(w *worker, c *conn) {
 			defer func() {
 				if e := recover(); e != nil {
@@ -469,6 +472,7 @@ type conn struct {
 	laddr    net.Addr
 	raddr    net.Addr
 	upgrade  net.Conn
+	upgraded int32
 	messages Messages
 	ready    int32
 	closed   int32
