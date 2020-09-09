@@ -249,14 +249,24 @@ func (w *worker) run(wg *sync.WaitGroup) {
 	var err error
 	for err == nil {
 		n, err = w.poll.Wait(w.events)
-		for i := 0; i < n; i++ {
+		for i := range w.events[:n] {
 			if w.async {
-				go w.serve(w.events[i])
+				ev := w.events[i]
+				job := func() {
+					w.serve(ev)
+				}
+				select {
+				case w.jobs <- job:
+				case w.tasks <- struct{}{}:
+					go w.task(job)
+				default:
+					go job()
+				}
 			} else {
 				w.serve(w.events[i])
 			}
 		}
-		if atomic.LoadInt64(&w.count) == 0 {
+		if atomic.LoadInt64(&w.count) < 1 {
 			w.lock.Lock()
 			w.Sleep()
 			w.running = false
@@ -346,23 +356,13 @@ func (w *worker) read(c *conn) error {
 		if w.async {
 			req = make([]byte, n)
 			copy(req, msg)
-			job := func() {
-				w.do(c, req)
-			}
-			select {
-			case w.jobs <- job:
-			case w.tasks <- struct{}{}:
-				go w.task(job)
-			default:
-				go job()
-			}
 		} else {
 			if !w.listener.Event.NoCopy {
 				req = make([]byte, n)
 				copy(req, msg)
 			}
-			w.do(c, req)
 		}
+		w.do(c, req)
 		if c.upgrade == nil && c.messages == nil {
 			break
 		}
