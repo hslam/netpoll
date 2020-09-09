@@ -376,9 +376,13 @@ func (w *worker) read(c *conn) error {
 func (w *worker) do(c *conn, req []byte) {
 	res := w.handle(req)
 	if c.messages != nil {
+		c.sending.Lock()
 		c.messages.WriteMessage(res)
+		c.sending.Unlock()
 	} else if c.upgrade != nil {
+		c.sending.Lock()
 		c.upgrade.Write(res)
+		c.sending.Unlock()
 	} else {
 		c.Write(res)
 	}
@@ -457,6 +461,7 @@ func (w *worker) Close() {
 
 type conn struct {
 	w        *worker
+	sending  sync.Mutex
 	rMu      sync.Mutex
 	wMu      sync.Mutex
 	fd       int
