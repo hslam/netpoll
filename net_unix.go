@@ -342,7 +342,10 @@ func (w *worker) read(c *conn) error {
 			c.reading.Unlock()
 		}
 		if n == 0 || err != nil {
-			if err == syscall.EAGAIN || atomic.LoadInt32(&c.closed) > 0 {
+			if err == syscall.EAGAIN {
+				return nil
+			}
+			if !atomic.CompareAndSwapInt32(&c.closing, 0, 1) {
 				return nil
 			}
 			w.decrease(c)
@@ -469,6 +472,7 @@ type conn struct {
 	upgraded int32
 	messages Messages
 	ready    int32
+	closing  int32
 	closed   int32
 }
 
