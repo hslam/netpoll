@@ -11,9 +11,10 @@ import (
 )
 
 type Poll struct {
-	fd     int
-	events []syscall.EpollEvent
-	pool   *sync.Pool
+	fd      int
+	events  []syscall.EpollEvent
+	pool    *sync.Pool
+	timeout int
 }
 
 func Create() (*Poll, error) {
@@ -27,6 +28,7 @@ func Create() (*Poll, error) {
 		pool: &sync.Pool{New: func() interface{} {
 			return syscall.EpollEvent{}
 		}},
+		timeout: 1000,
 	}, nil
 }
 
@@ -57,7 +59,7 @@ func (p *Poll) Wait(events []PollEvent) (n int, err error) {
 	} else {
 		p.events = make([]syscall.EpollEvent, len(events))
 	}
-	n, err = syscall.EpollWait(p.fd, p.events, -1)
+	n, err = syscall.EpollWait(p.fd, p.events, p.timeout)
 	if err != nil && err != syscall.EINTR {
 		return 0, err
 	}

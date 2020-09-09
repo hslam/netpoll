@@ -11,9 +11,10 @@ import (
 )
 
 type Poll struct {
-	fd     int
-	events []syscall.Kevent_t
-	pool   *sync.Pool
+	fd      int
+	events  []syscall.Kevent_t
+	pool    *sync.Pool
+	timeout *syscall.Timespec
 }
 
 func Create() (*Poll, error) {
@@ -27,6 +28,7 @@ func Create() (*Poll, error) {
 		pool: &sync.Pool{New: func() interface{} {
 			return []syscall.Kevent_t{{Filter: syscall.EVFILT_READ}, {Filter: syscall.EVFILT_WRITE}}
 		}},
+		timeout: &syscall.Timespec{Sec: 1},
 	}, nil
 }
 
@@ -61,7 +63,7 @@ func (p *Poll) Wait(events []PollEvent) (n int, err error) {
 	} else {
 		p.events = make([]syscall.Kevent_t, len(events))
 	}
-	n, err = syscall.Kevent(p.fd, nil, p.events, nil)
+	n, err = syscall.Kevent(p.fd, nil, p.events, p.timeout)
 	if err != nil && err != syscall.EINTR {
 		return 0, err
 	}
