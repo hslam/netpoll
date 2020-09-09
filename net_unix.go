@@ -90,7 +90,7 @@ func (l *Listener) Serve() (err error) {
 			handle:   l.Event.Handle,
 			async:    async,
 			done:     make(chan struct{}, 1),
-			jobs:     make(chan *job),
+			jobs:     make(chan func()),
 			tasks:    make(chan struct{}, numCPU),
 		}
 		if w.async {
@@ -206,7 +206,7 @@ type worker struct {
 	buf      []byte
 	handle   func(req []byte) (res []byte)
 	async    bool
-	jobs     chan *job
+	jobs     chan func()
 	tasks    chan struct{}
 	done     chan struct{}
 	lock     sync.Mutex
@@ -215,19 +215,14 @@ type worker struct {
 	closed   int32
 }
 
-type job struct {
-	conn *conn
-	req  []byte
-}
-
-func (w *worker) task(j *job) {
+func (w *worker) task(job func()) {
 	defer func() { <-w.tasks }()
 	for {
-		w.do(j.conn, j.req)
+		job()
 		t := time.NewTimer(time.Second)
 		runtime.Gosched()
 		select {
-		case j = <-w.jobs:
+		case job = <-w.jobs:
 			t.Stop()
 		case <-t.C:
 			return
@@ -352,12 +347,15 @@ func (w *worker) read(c *conn) error {
 		if w.async {
 			req = make([]byte, n)
 			copy(req, msg)
+			job := func() {
+				w.do(c, req)
+			}
 			select {
-			case w.jobs <- &job{c, req}:
+			case w.jobs <- job:
 			case w.tasks <- struct{}{}:
-				go w.task(&job{c, req})
+				go w.task(job)
 			default:
-				go w.do(c, req)
+				go job()
 			}
 		} else {
 			if !w.listener.Event.NoCopy {
