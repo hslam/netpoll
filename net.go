@@ -6,7 +6,6 @@ package poll
 import (
 	"errors"
 	"net"
-	"sync"
 )
 
 type Event struct {
@@ -15,7 +14,7 @@ type Event struct {
 	NoAsync       bool
 	UpgradeConn   func(conn net.Conn) (upgrade net.Conn, err error)
 	Handle        func(req []byte) (res []byte)
-	UpgradeHandle func(conn net.Conn) (handle func(reading *sync.Mutex, writing *sync.Mutex) error, err error)
+	UpgradeHandle func(conn net.Conn) (handle func() error, err error)
 }
 
 type listener struct {
@@ -45,7 +44,7 @@ func (l *listener) Serve() (err error) {
 				if e := recover(); e != nil {
 				}
 			}()
-			var handle func(reading *sync.Mutex, writing *sync.Mutex) error
+			var handle func() error
 			if l.Event.UpgradeConn != nil {
 				if upgrade, err := l.Event.UpgradeConn(c); err != nil {
 					return
@@ -63,10 +62,8 @@ func (l *listener) Serve() (err error) {
 			var n int
 			var err error
 			if handle != nil {
-				var reading sync.Mutex
-				var writing sync.Mutex
 				for err == nil {
-					err = handle(&reading, &writing)
+					err = handle()
 				}
 			} else {
 				var buf = make([]byte, l.Event.Buffer)

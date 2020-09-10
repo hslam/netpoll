@@ -323,7 +323,7 @@ func (w *worker) write(c *conn) error {
 
 func (w *worker) handleConn(c *conn) error {
 	for {
-		err := c.handle(&c.reading, &c.writing)
+		err := c.handle()
 		if err != nil {
 			if err == syscall.EAGAIN {
 				return nil
@@ -481,7 +481,7 @@ type conn struct {
 	raddr    net.Addr
 	upgrade  net.Conn
 	upgraded int32
-	handle   func(reading *sync.Mutex, writing *sync.Mutex) error
+	handle   func() error
 	ready    int32
 	closing  int32
 	closed   int32
