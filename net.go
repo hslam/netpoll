@@ -6,22 +6,16 @@ package poll
 import (
 	"errors"
 	"net"
+	"sync"
 )
 
-type Messages interface {
-	SetBatch(batch func() int)
-	ReadMessage() ([]byte, error)
-	WriteMessage([]byte) error
-	Close() error
-}
-
 type Event struct {
-	Buffer  int
-	NoCopy  bool
-	NoAsync bool
-	Batch   func() int
-	Upgrade func(conn net.Conn) (net.Conn, Messages, error)
-	Handle  func(req []byte) (res []byte)
+	Buffer        int
+	NoCopy        bool
+	NoAsync       bool
+	UpgradeConn   func(conn net.Conn) (upgrade net.Conn, err error)
+	Handle        func(req []byte) (res []byte)
+	UpgradeHandle func(conn net.Conn) (handle func(reading *sync.Mutex, writing *sync.Mutex) error, err error)
 }
 
 type listener struct {
@@ -35,8 +29,8 @@ func (l *listener) Serve() (err error) {
 	}
 	if l.Event == nil {
 		return errors.New("event is nil")
-	} else if l.Event.Upgrade == nil && l.Event.Handle == nil {
-		return errors.New("need Upgrade or Handle")
+	} else if l.Event.Handle == nil && l.Event.UpgradeHandle == nil {
+		return errors.New("need Handle or UpgradeHandle")
 	}
 	if l.Event.Buffer < 1 {
 		l.Event.Buffer = 0x10000
@@ -51,35 +45,29 @@ func (l *listener) Serve() (err error) {
 				if e := recover(); e != nil {
 				}
 			}()
-			var messages Messages
-			if l.Event.Upgrade != nil {
-				if upgrade, m, err := l.Event.Upgrade(c); err != nil {
+			var handle func(reading *sync.Mutex, writing *sync.Mutex) error
+			if l.Event.UpgradeConn != nil {
+				if upgrade, err := l.Event.UpgradeConn(c); err != nil {
+					return
+				} else if upgrade != nil && upgrade != c {
+					c = upgrade
+				}
+			}
+			if l.Event.UpgradeHandle != nil {
+				if h, err := l.Event.UpgradeHandle(c); err != nil {
 					return
 				} else {
-					if m != nil {
-						messages = m
-						if l.Event.Batch != nil {
-							messages.SetBatch(l.Event.Batch)
-						}
-					}
-					if upgrade != nil && upgrade != c {
-						c = upgrade
-					}
+					handle = h
 				}
 			}
 			var n int
 			var err error
-			if messages != nil {
-				var req []byte
+			if handle != nil {
+				var reading sync.Mutex
+				var writing sync.Mutex
 				for err == nil {
-					req, err = messages.ReadMessage()
-					if err != nil {
-						break
-					}
-					res := l.Event.Handle(req)
-					err = messages.WriteMessage(res)
+					err = handle(&reading, &writing)
 				}
-				messages.Close()
 			} else {
 				var buf = make([]byte, l.Event.Buffer)
 				for err == nil {

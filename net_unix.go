@@ -41,8 +41,8 @@ func (l *Listener) Serve() (err error) {
 	}
 	if l.Event == nil {
 		return errors.New("event is nil")
-	} else if l.Event.Handle == nil {
-		return errors.New("Handle is nil")
+	} else if l.Event.Handle == nil && l.Event.UpgradeHandle == nil {
+		return errors.New("need Handle or UpgradeHandle")
 	}
 	if l.Event.Buffer < 1 {
 		l.Event.Buffer = 0x10000
@@ -93,12 +93,14 @@ func (l *Listener) Serve() (err error) {
 			jobs:     make(chan func()),
 			tasks:    make(chan struct{}, numCPU),
 		}
-		if w.async {
-			w.pool = &sync.Pool{New: func() interface{} {
-				return make([]byte, l.Event.Buffer)
-			}}
-		} else {
-			w.buf = make([]byte, l.Event.Buffer)
+		if w.listener.Event.UpgradeHandle == nil {
+			if w.async {
+				w.pool = &sync.Pool{New: func() interface{} {
+					return make([]byte, l.Event.Buffer)
+				}}
+			} else {
+				w.buf = make([]byte, l.Event.Buffer)
+			}
 		}
 		l.workers = append(l.workers, w)
 	}
@@ -230,6 +232,7 @@ func (w *worker) task(job func()) {
 		}
 	}
 }
+
 func (w *worker) Wake(wg *sync.WaitGroup) {
 	w.lock.Lock()
 	if !w.running {
@@ -243,6 +246,7 @@ func (w *worker) Wake(wg *sync.WaitGroup) {
 		w.lock.Unlock()
 	}
 }
+
 func (w *worker) run(wg *sync.WaitGroup) {
 	defer wg.Done()
 	var n int
@@ -295,20 +299,42 @@ func (w *worker) serve(ev PollEvent) error {
 		case WRITE:
 			w.write(c)
 		case READ:
-			w.read(c)
+			if c.handle != nil {
+				w.handleConn(c)
+			} else {
+				w.read(c)
+			}
 		}
 		return nil
 	}
 }
 
 func (w *worker) write(c *conn) error {
-	c.sending.Lock()
+	c.writing.Lock()
 	retain, err := c.flush()
-	c.sending.Unlock()
+	c.writing.Unlock()
 	if err != nil {
 		return err
 	} else if retain > 0 {
 		w.poll.Write(c.fd)
+	}
+	return nil
+}
+
+func (w *worker) handleConn(c *conn) error {
+	for {
+		err := c.handle(&c.reading, &c.writing)
+		if err != nil {
+			if err == syscall.EAGAIN {
+				return nil
+			}
+			if !atomic.CompareAndSwapInt32(&c.closing, 0, 1) {
+				return nil
+			}
+			w.decrease(c)
+			c.Close()
+			return nil
+		}
 	}
 	return nil
 }
@@ -318,29 +344,21 @@ func (w *worker) read(c *conn) error {
 		var n int
 		var err error
 		var buf []byte
-		var msg []byte
 		var req []byte
-		if c.messages != nil {
-			c.reading.Lock()
-			msg, err = c.messages.ReadMessage()
-			c.reading.Unlock()
-			n = len(msg)
+		if w.async {
+			buf = w.pool.Get().([]byte)
+			buf = buf[:cap(buf)]
+			defer w.pool.Put(buf)
 		} else {
-			if w.async {
-				buf = w.pool.Get().([]byte)
-				buf = buf[:cap(buf)]
-				defer w.pool.Put(buf)
-			} else {
-				buf = w.buf
-			}
-			c.reading.Lock()
-			if c.upgrade != nil {
-				n, err = c.upgrade.Read(buf)
-			} else {
-				n, err = c.Read(buf)
-			}
-			c.reading.Unlock()
+			buf = w.buf
 		}
+		c.reading.Lock()
+		if c.upgrade != nil {
+			n, err = c.upgrade.Read(buf)
+		} else {
+			n, err = c.Read(buf)
+		}
+		c.reading.Unlock()
 		if n == 0 || err != nil {
 			if err == syscall.EAGAIN {
 				return nil
@@ -352,34 +370,26 @@ func (w *worker) read(c *conn) error {
 			c.Close()
 			return nil
 		}
-		if c.messages == nil {
-			msg = buf[:n]
-		}
-		req = msg
+		req = buf[:n]
 		if w.async {
 			req = make([]byte, n)
-			copy(req, msg)
+			copy(req, buf[:n])
 		} else {
 			if !w.listener.Event.NoCopy {
 				req = make([]byte, n)
-				copy(req, msg)
+				copy(req, buf[:n])
 			}
 		}
 		w.do(c, req)
-		if c.upgrade == nil && c.messages == nil {
-			break
-		}
 	}
 	return nil
 }
 
 func (w *worker) do(c *conn, req []byte) {
 	res := w.handle(req)
-	c.sending.Lock()
-	defer c.sending.Unlock()
-	if c.messages != nil {
-		c.messages.WriteMessage(res)
-	} else if c.upgrade != nil {
+	c.writing.Lock()
+	defer c.writing.Unlock()
+	if c.upgrade != nil {
 		c.upgrade.Write(res)
 	} else {
 		c.Write(res)
@@ -388,7 +398,7 @@ func (w *worker) do(c *conn, req []byte) {
 
 func (w *worker) register(c *conn) error {
 	w.increase(c)
-	if w.listener.Event.Upgrade != nil {
+	if w.listener.Event.UpgradeConn != nil || w.listener.Event.UpgradeHandle != nil {
 		if !atomic.CompareAndSwapInt32(&c.upgraded, 0, 1) {
 			return nil
 		}
@@ -400,17 +410,18 @@ func (w *worker) register(c *conn) error {
 			if err := syscall.SetNonblock(c.fd, false); err != nil {
 				return
 			}
-			if upgrade, m, err := w.listener.Event.Upgrade(c); err != nil {
-				return
-			} else {
-				if m != nil {
-					c.messages = m
-					if w.listener.Event.Batch != nil {
-						c.messages.SetBatch(w.listener.Event.Batch)
-					}
-				}
-				if upgrade != nil && upgrade != c {
+			if w.listener.Event.UpgradeConn != nil {
+				if upgrade, err := w.listener.Event.UpgradeConn(c); err != nil {
+					return
+				} else if upgrade != nil && upgrade != c {
 					c.upgrade = upgrade
+				}
+			}
+			if w.listener.Event.UpgradeHandle != nil {
+				if handle, err := w.listener.Event.UpgradeHandle(c); err != nil {
+					return
+				} else {
+					c.handle = handle
 				}
 			}
 			if err := syscall.SetNonblock(c.fd, true); err != nil {
@@ -463,14 +474,14 @@ func (w *worker) Close() {
 type conn struct {
 	w        *worker
 	reading  sync.Mutex
-	sending  sync.Mutex
+	writing  sync.Mutex
 	fd       int
 	send     []byte
 	laddr    net.Addr
 	raddr    net.Addr
 	upgrade  net.Conn
 	upgraded int32
-	messages Messages
+	handle   func(reading *sync.Mutex, writing *sync.Mutex) error
 	ready    int32
 	closing  int32
 	closed   int32
