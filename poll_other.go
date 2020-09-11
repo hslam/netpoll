@@ -9,6 +9,8 @@ import (
 	"errors"
 )
 
+var Tag = "none"
+
 type Poll struct {
 }
 

@@ -10,6 +10,8 @@ import (
 	"syscall"
 )
 
+var Tag = "kqueue"
+
 type Poll struct {
 	fd      int
 	events  []syscall.Kevent_t

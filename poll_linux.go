@@ -10,6 +10,8 @@ import (
 	"syscall"
 )
 
+var Tag = "epoll"
+
 type Poll struct {
 	fd      int
 	events  []syscall.EpollEvent
