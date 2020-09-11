@@ -7,7 +7,6 @@ package poll
 
 import (
 	"errors"
-	"io"
 	"net"
 	"os"
 	"runtime"
@@ -18,7 +17,6 @@ import (
 )
 
 var numCPU = runtime.NumCPU()
-var EOF = io.EOF
 
 func Serve(lis net.Listener, event *Event) error {
 	l := &Listener{Listener: lis, Event: event}

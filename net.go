@@ -5,8 +5,13 @@ package poll
 
 import (
 	"errors"
+	"io"
 	"net"
+	"syscall"
 )
+
+var EOF = io.EOF
+var EAGAIN = syscall.EAGAIN
 
 type Event struct {
 	Buffer        int
