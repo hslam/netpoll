@@ -7,6 +7,7 @@ package poll
 
 import (
 	"errors"
+	"io"
 	"net"
 	"os"
 	"runtime"
@@ -17,6 +18,7 @@ import (
 )
 
 var numCPU = runtime.NumCPU()
+var EOF = io.EOF
 
 func Serve(lis net.Listener, event *Event) error {
 	l := &Listener{Listener: lis, Event: event}
@@ -475,6 +477,8 @@ type conn struct {
 	w        *worker
 	reading  sync.Mutex
 	writing  sync.Mutex
+	rlock    sync.Mutex
+	wlock    sync.Mutex
 	fd       int
 	send     []byte
 	laddr    net.Addr
@@ -488,9 +492,14 @@ type conn struct {
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
+	c.rlock.Lock()
+	defer c.rlock.Unlock()
 	n, err = syscall.Read(c.fd, b)
 	if n == 0 {
-		err = syscall.EINVAL
+		err = EOF
 	}
 	if n < 0 {
 		n = 0
@@ -502,6 +511,8 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
+	c.wlock.Lock()
+	defer c.wlock.Unlock()
 	if atomic.LoadInt32(&c.ready) == 1 {
 		if retain, err := c.flush(); err != nil || retain > 0 {
 			c.write(b)
