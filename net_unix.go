@@ -170,6 +170,13 @@ func (l *Listener) accept() (err error) {
 }
 
 func (l *Listener) assignWorker() (w *worker) {
+	if w := l.idleSyncWorker(); w != nil {
+		return w
+	}
+	return l.leastConnectedAsyncWorker()
+}
+
+func (l *Listener) idleSyncWorker() (w *worker) {
 	if l.syncWorkers > 0 {
 		for i := 0; i < int(l.syncWorkers); i++ {
 			if l.workers[i].count < 1 {
@@ -177,10 +184,10 @@ func (l *Listener) assignWorker() (w *worker) {
 			}
 		}
 	}
-	return l.leastConnectedWorker()
+	return nil
 }
 
-func (l *Listener) leastConnectedWorker() (w *worker) {
+func (l *Listener) leastConnectedAsyncWorker() (w *worker) {
 	min := l.workers[l.syncWorkers].count
 	index := int(l.syncWorkers)
 	if len(l.workers) > int(l.syncWorkers) {
