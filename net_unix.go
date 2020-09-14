@@ -410,7 +410,7 @@ func (w *worker) run(wg *sync.WaitGroup) {
 				w.serve(ev)
 			}
 		}
-		if n > 0 {
+		if n > 0 && w.async {
 			w.listener.wakeReschedule()
 		}
 		if atomic.LoadInt64(&w.count) < 1 {
