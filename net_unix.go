@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -24,15 +25,22 @@ func Serve(lis net.Listener, event *Event) error {
 }
 
 type Listener struct {
-	Listener    net.Listener
-	Event       *Event
-	file        *os.File
-	fd          int
-	poll        *Poll
-	workers     []*worker
-	syncWorkers uint
-	wg          sync.WaitGroup
-	closed      int32
+	Listener     net.Listener
+	Event        *Event
+	file         *os.File
+	fd           int
+	poll         *Poll
+	workers      []*worker
+	rescheduled  bool
+	lock         sync.Mutex
+	wake         bool
+	rescheduling int32
+	list         list
+	adjust       list
+	syncWorkers  uint
+	wg           sync.WaitGroup
+	closed       int32
+	done         chan struct{}
 }
 
 func (l *Listener) Serve() (err error) {
@@ -68,10 +76,16 @@ func (l *Listener) Serve() (err error) {
 		return err
 	}
 	l.syncWorkers = 16
+	if numCPU > 16 {
+		l.syncWorkers = uint(numCPU)
+	}
 	if l.poll, err = Create(); err != nil {
 		return err
 	}
 	l.poll.Register(l.fd)
+	if !l.Event.NoAsync && l.syncWorkers > 0 {
+		l.rescheduled = true
+	}
 	for i := 0; i < int(l.syncWorkers)+numCPU; i++ {
 		p, err := Create()
 		if err != nil {
@@ -104,6 +118,7 @@ func (l *Listener) Serve() (err error) {
 		}
 		l.workers = append(l.workers, w)
 	}
+	l.done = make(chan struct{}, 1)
 	var n int
 	var events = make([]PollEvent, 1)
 	for err == nil {
@@ -179,6 +194,123 @@ func (l *Listener) leastConnectedWorker() (w *worker) {
 	return l.workers[index]
 }
 
+func (l *Listener) wakeReschedule() {
+	if !l.rescheduled {
+		return
+	}
+	l.lock.Lock()
+	if !l.wake {
+		l.wake = true
+		l.lock.Unlock()
+		go func() {
+			ticker := time.NewTicker(time.Millisecond * 100)
+			for {
+				select {
+				case <-ticker.C:
+					stop := l.reschedule()
+					if stop {
+						l.lock.Lock()
+						l.wake = false
+						ticker.Stop()
+						l.lock.Unlock()
+						return
+					}
+				case <-l.done:
+					ticker.Stop()
+					return
+				}
+			}
+		}()
+	} else {
+		l.lock.Unlock()
+	}
+}
+
+func (l *Listener) reschedule() (stop bool) {
+	if !l.rescheduled {
+		return
+	}
+	if !atomic.CompareAndSwapInt32(&l.rescheduling, 0, 1) {
+		return false
+	}
+	defer atomic.StoreInt32(&l.rescheduling, 0)
+	l.adjust = l.adjust[:0]
+	l.list = l.list[:0]
+	sum := int64(0)
+	for idx, w := range l.workers {
+		w.lock.Lock()
+		running := w.running
+		w.lock.Unlock()
+		if !running {
+			continue
+		}
+		w.mu.Lock()
+		for _, conn := range w.conns {
+			if uint(idx) < l.syncWorkers {
+				l.adjust = append(l.adjust, conn)
+			}
+			conn.score = atomic.LoadInt64(&conn.count)
+			atomic.StoreInt64(&conn.count, 0)
+			sum += conn.score
+			l.list = append(l.list, conn)
+		}
+		w.mu.Unlock()
+	}
+	if len(l.list) == 0 || sum == 0 {
+		return true
+	}
+	sort.Sort(l.list)
+	syncWorkers := l.syncWorkers
+	if uint(len(l.list)) < l.syncWorkers {
+		syncWorkers = uint(len(l.list))
+	}
+	index := 0
+	for _, conn := range l.list[:syncWorkers] {
+		conn.lock.Lock()
+		if conn.w.async {
+			conn.lock.Unlock()
+			l.list[index] = conn
+			index++
+		} else {
+			conn.lock.Unlock()
+			if len(l.adjust) > 0 {
+				for i := 0; i < len(l.adjust); i++ {
+					if conn == l.adjust[i] {
+						if i < len(l.adjust)-1 {
+							copy(l.adjust[i:], l.adjust[i+1:])
+						}
+						l.adjust = l.adjust[:len(l.adjust)-1]
+						break
+					}
+				}
+			}
+		}
+	}
+	var reschedules = l.list[:index]
+	if len(reschedules) == 0 || len(reschedules) != len(l.adjust) {
+		return false
+	}
+	for i := 0; i < len(reschedules); i++ {
+		l.adjust[i].lock.Lock()
+		reschedules[i].lock.Lock()
+		syncWorker := l.adjust[i].w
+		asyncWorker := reschedules[i].w
+		syncWorker.mu.Lock()
+		asyncWorker.mu.Lock()
+		syncWorker.decrease(l.adjust[i])
+		l.adjust[i].w = asyncWorker
+		asyncWorker.increase(l.adjust[i])
+		asyncWorker.decrease(reschedules[i])
+		reschedules[i].w = syncWorker
+		syncWorker.increase(reschedules[i])
+		asyncWorker.mu.Unlock()
+		syncWorker.mu.Unlock()
+		l.adjust[i].lock.Unlock()
+		reschedules[i].lock.Unlock()
+	}
+	return false
+}
+
 func (l *Listener) Close() error {
 	if !atomic.CompareAndSwapInt32(&l.closed, 0, 1) {
 		return nil
@@ -192,6 +324,7 @@ func (l *Listener) Close() error {
 	if err := l.file.Close(); err != nil {
 		return err
 	}
+	close(l.done)
 	return l.poll.Close()
 }
 
@@ -247,6 +380,13 @@ func (w *worker) Wake(wg *sync.WaitGroup) {
 	}
 }
 
+func (w *worker) Sleep() {
+	if !atomic.CompareAndSwapInt32(&w.slept, 0, 1) {
+		return
+	}
+	close(w.done)
+}
+
 func (w *worker) run(wg *sync.WaitGroup) {
 	defer wg.Done()
 	var n int
@@ -269,6 +409,9 @@ func (w *worker) run(wg *sync.WaitGroup) {
 			} else {
 				w.serve(ev)
 			}
+		}
+		if n > 0 {
+			w.listener.wakeReschedule()
 		}
 		if atomic.LoadInt64(&w.count) < 1 {
 			w.lock.Lock()
@@ -366,7 +509,7 @@ func (w *worker) read(c *conn) error {
 			if !atomic.CompareAndSwapInt32(&c.closing, 0, 1) {
 				return nil
 			}
-			w.decrease(c)
+			w.Decrease(c)
 			c.Close()
 			return nil
 		}
@@ -397,7 +540,7 @@ func (w *worker) do(c *conn, req []byte) {
 }
 
 func (w *worker) register(c *conn) error {
-	w.increase(c)
+	w.Increase(c)
 	if w.listener.Event.UpgradeConn != nil || w.listener.Event.UpgradeHandle != nil {
 		if !atomic.CompareAndSwapInt32(&c.upgraded, 0, 1) {
 			return nil
@@ -428,34 +571,37 @@ func (w *worker) register(c *conn) error {
 				return
 			}
 			atomic.StoreInt32(&c.ready, 1)
+			c.sendRetain()
 		}(w, c)
 		return nil
 	}
 	atomic.StoreInt32(&c.ready, 1)
+	c.sendRetain()
 	return nil
 }
 
-func (w *worker) increase(c *conn) {
+func (w *worker) Increase(c *conn) {
 	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.increase(c)
+}
+
+func (w *worker) increase(c *conn) {
 	w.conns[c.fd] = c
-	w.mu.Unlock()
 	atomic.AddInt64(&w.count, 1)
 	w.poll.Register(c.fd)
+}
+
+func (w *worker) Decrease(c *conn) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.decrease(c)
 }
 
 func (w *worker) decrease(c *conn) {
 	w.poll.Unregister(c.fd)
 	atomic.AddInt64(&w.count, -1)
-	w.mu.Lock()
 	delete(w.conns, c.fd)
-	w.mu.Unlock()
-}
-
-func (w *worker) Sleep() {
-	if !atomic.CompareAndSwapInt32(&w.slept, 0, 1) {
-		return
-	}
-	close(w.done)
 }
 
 func (w *worker) Close() {
@@ -472,6 +618,7 @@ func (w *worker) Close() {
 }
 
 type conn struct {
+	lock     sync.Mutex
 	w        *worker
 	reading  sync.Mutex
 	writing  sync.Mutex
@@ -485,6 +632,8 @@ type conn struct {
 	upgraded int32
 	handle   func() error
 	ready    int32
+	count    int64
+	score    int64
 	closing  int32
 	closed   int32
 }
@@ -492,6 +641,13 @@ type conn struct {
 func (c *conn) Read(b []byte) (n int, err error) {
 	if len(b) == 0 {
 		return 0, nil
+	}
+	c.lock.Lock()
+	if c.w.listener.rescheduled {
+		c.lock.Unlock()
+		atomic.AddInt64(&c.count, 1)
+	} else {
+		c.lock.Unlock()
 	}
 	c.rlock.Lock()
 	defer c.rlock.Unlock()
@@ -537,7 +693,11 @@ func (c *conn) write(b []byte) (n int, err error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
-	defer c.w.poll.Write(c.fd)
+	defer func() {
+		c.lock.Lock()
+		c.w.poll.Write(c.fd)
+		c.lock.Unlock()
+	}()
 	c.send = append(c.send, b...)
 	return len(b), nil
 }
@@ -559,12 +719,23 @@ func (c *conn) flush() (retain int, err error) {
 	return
 }
 
+func (c *conn) sendRetain() {
+	c.lock.Lock()
+	c.wlock.Lock()
+	if len(c.send) > 0 {
+		c.w.poll.Write(c.fd)
+	}
+	c.wlock.Unlock()
+	c.lock.Unlock()
+}
+
 func (c *conn) Close() (err error) {
 	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
 		return
 	}
 	return syscall.Close(c.fd)
 }
+
 func (c *conn) LocalAddr() net.Addr {
 	return c.laddr
 }
@@ -583,4 +754,24 @@ func (c *conn) SetReadDeadline(t time.Time) error {
 
 func (c *conn) SetWriteDeadline(t time.Time) error {
 	return errors.New("not supported")
+}
+
+type list []*conn
+
+func (l list) Len() int {
+	return len(l)
+}
+
+func (l list) Less(i, j int) bool {
+	if atomic.LoadInt64(&l[i].score) > atomic.LoadInt64(&l[j].score) {
+		return true
+	} else {
+		return false
+	}
+}
+
+func (l list) Swap(i, j int) {
+	var temp = l[i]
+	l[i] = l[j]
+	l[j] = temp
 }
