@@ -6,6 +6,7 @@
 package netpoll
 
 import (
+	"errors"
 	"sync"
 	"syscall"
 	"time"
@@ -36,6 +37,9 @@ func Create() (*Poll, error) {
 }
 
 func (p *Poll) SetTimeout(d time.Duration) (err error) {
+	if d < time.Millisecond {
+		return errors.New("non-positive interval for SetTimeout")
+	}
 	p.timeout.Sec = int64(d / time.Second)
 	p.timeout.Nsec = int64(d % time.Second)
 	return nil
