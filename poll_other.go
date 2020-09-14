@@ -7,6 +7,7 @@ package netpoll
 
 import (
 	"errors"
+	"time"
 )
 
 var Tag = "none"
@@ -16,6 +17,10 @@ type Poll struct {
 
 func Create() (*Poll, error) {
 	return nil, errors.New("system not supported")
+}
+
+func (p *Poll) SetTimeout(d time.Duration) (err error) {
+	return nil
 }
 
 func (p *Poll) Register(fd int) (err error) {

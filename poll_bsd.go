@@ -8,6 +8,7 @@ package netpoll
 import (
 	"sync"
 	"syscall"
+	"time"
 )
 
 var Tag = "kqueue"
@@ -32,6 +33,12 @@ func Create() (*Poll, error) {
 		}},
 		timeout: &syscall.Timespec{Sec: 60},
 	}, nil
+}
+
+func (p *Poll) SetTimeout(d time.Duration) (err error) {
+	p.timeout.Sec = int64(d / time.Second)
+	p.timeout.Nsec = int64(d % time.Second)
+	return nil
 }
 
 func (p *Poll) Register(fd int) (err error) {

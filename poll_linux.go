@@ -8,6 +8,7 @@ package netpoll
 import (
 	"sync"
 	"syscall"
+	"time"
 )
 
 var Tag = "epoll"
@@ -32,6 +33,11 @@ func Create() (*Poll, error) {
 		}},
 		timeout: 60000,
 	}, nil
+}
+
+func (p *Poll) SetTimeout(d time.Duration) (err error) {
+	p.timeout = int(d / time.Millisecond)
+	return nil
 }
 
 func (p *Poll) Register(fd int) (err error) {
