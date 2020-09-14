@@ -3,7 +3,7 @@
 
 // +build !linux,!darwin,!dragonfly,!freebsd,!netbsd,!openbsd
 
-package poll
+package netpoll
 
 import (
 	"net"

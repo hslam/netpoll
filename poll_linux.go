@@ -3,7 +3,7 @@
 
 // +build linux
 
-package poll
+package netpoll
 
 import (
 	"sync"

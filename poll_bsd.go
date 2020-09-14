@@ -3,7 +3,7 @@
 
 // +build darwin dragonfly freebsd netbsd openbsd
 
-package poll
+package netpoll
 
 import (
 	"sync"
