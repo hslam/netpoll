@@ -30,7 +30,7 @@ func Create() (*Poll, error) {
 		pool: &sync.Pool{New: func() interface{} {
 			return []syscall.Kevent_t{{Filter: syscall.EVFILT_READ}, {Filter: syscall.EVFILT_WRITE}}
 		}},
-		timeout: &syscall.Timespec{Sec: 1},
+		timeout: &syscall.Timespec{Sec: 60},
 	}, nil
 }
 

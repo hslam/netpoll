@@ -30,7 +30,7 @@ func Create() (*Poll, error) {
 		pool: &sync.Pool{New: func() interface{} {
 			return syscall.EpollEvent{}
 		}},
-		timeout: 1000,
+		timeout: 60000,
 	}, nil
 }
 
