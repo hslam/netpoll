@@ -439,26 +439,26 @@ func (w *worker) serve(ev PollEvent) error {
 		return nil
 	}
 	w.mu.Lock()
-	if c, ok := w.conns[fd]; !ok {
+	c, ok := w.conns[fd]
+	if !ok {
 		w.mu.Unlock()
-		return nil
-	} else {
-		w.mu.Unlock()
-		if atomic.LoadInt32(&c.ready) == 0 {
-			return nil
-		}
-		switch ev.Mode {
-		case WRITE:
-			w.write(c)
-		case READ:
-			if c.handler != nil {
-				w.handleConn(c)
-			} else {
-				w.read(c)
-			}
-		}
 		return nil
 	}
+	w.mu.Unlock()
+	if atomic.LoadInt32(&c.ready) == 0 {
+		return nil
+	}
+	switch ev.Mode {
+	case WRITE:
+		w.write(c)
+	case READ:
+		if c.handler != nil {
+			w.handleConn(c)
+		} else {
+			w.read(c)
+		}
+	}
+	return nil
 }
 
 func (w *worker) write(c *conn) error {
@@ -570,11 +570,11 @@ func (w *worker) register(c *conn) error {
 				}
 			}
 			if w.listener.Event.UpgradeHandler != nil {
-				if handler, err := w.listener.Event.UpgradeHandler(c); err != nil {
+				handler, err := w.listener.Event.UpgradeHandler(c)
+				if err != nil {
 					return
-				} else {
-					c.handler = handler
 				}
+				c.handler = handler
 			}
 			if err := syscall.SetNonblock(c.fd, true); err != nil {
 				return
@@ -688,10 +688,9 @@ func (c *conn) Write(b []byte) (n int, err error) {
 		if n < 1 || err != nil {
 			if atomic.LoadInt32(&c.ready) == 0 {
 				return len(b) - retain, err
-			} else {
-				c.write(b[len(b)-retain:])
-				break
 			}
+			c.write(b[len(b)-retain:])
+			break
 		}
 		retain -= n
 	}
@@ -774,9 +773,8 @@ func (l list) Len() int {
 func (l list) Less(i, j int) bool {
 	if atomic.LoadInt64(&l[i].score) > atomic.LoadInt64(&l[j].score) {
 		return true
-	} else {
-		return false
 	}
+	return false
 }
 
 func (l list) Swap(i, j int) {

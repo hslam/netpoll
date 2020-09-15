@@ -79,18 +79,19 @@ func (l *listener) Serve() (err error) {
 			}()
 			var handler func() error
 			if l.Event.UpgradeConn != nil {
-				if upgrade, err := l.Event.UpgradeConn(c); err != nil {
+				upgrade, err := l.Event.UpgradeConn(c)
+				if err != nil {
 					return
 				} else if upgrade != nil && upgrade != c {
 					c = upgrade
 				}
 			}
 			if l.Event.UpgradeHandler != nil {
-				if h, err := l.Event.UpgradeHandler(c); err != nil {
+				h, err := l.Event.UpgradeHandler(c)
+				if err != nil {
 					return
-				} else {
-					handler = h
 				}
+				handler = h
 			}
 			var n int
 			var err error
