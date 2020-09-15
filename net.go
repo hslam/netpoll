@@ -34,6 +34,16 @@ type Event struct {
 	UpgradeHandler func(conn net.Conn) (handle func() error, err error)
 }
 
+// ListenAndServe listens on the network address and then calls
+// Serve with event on incoming connections
+func ListenAndServe(network, address string, event *Event) error {
+	lis, err := net.Listen(network, address)
+	if err != nil {
+		panic(err)
+	}
+	return Serve(lis, event)
+}
+
 // Serve serves with event on incoming connections.
 func Serve(lis net.Listener, event *Event) error {
 	l := &Listener{Listener: lis, Event: event}

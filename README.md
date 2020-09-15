@@ -26,22 +26,17 @@ import "github.com/hslam/netpoll"
 ```
 package main
 
-import (
-	"github.com/hslam/netpoll"
-	"net"
-)
+import "github.com/hslam/netpoll"
 
 func main() {
-	lis, err := net.Listen("tcp", ":9999")
-	if err != nil {
-		panic(err)
-	}
-	netpoll.Serve(lis, &netpoll.Event{
+	if err := netpoll.ListenAndServe("tcp", ":9999", &netpoll.Event{
 		Handler: func(req []byte) (res []byte) {
 			res = req
 			return
 		},
-	})
+	}); err != nil {
+		panic(err)
+	}
 }
 ```
 
