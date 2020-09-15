@@ -9,12 +9,6 @@ import (
 	"net"
 )
 
-// Serve serves with event on incoming connections.
-func Serve(lis net.Listener, event *Event) error {
-	l := &Listener{Listener: lis, Event: event}
-	return l.Serve()
-}
-
 //Listener is a generic network listener for stream-oriented protocols.
 type Listener struct {
 	//Listener is a net.Listener.

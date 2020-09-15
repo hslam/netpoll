@@ -34,6 +34,12 @@ type Event struct {
 	UpgradeHandler func(conn net.Conn) (handle func() error, err error)
 }
 
+// Serve serves with event on incoming connections.
+func Serve(lis net.Listener, event *Event) error {
+	l := &Listener{Listener: lis, Event: event}
+	return l.Serve()
+}
+
 type listener struct {
 	Listener net.Listener
 	Event    *Event
