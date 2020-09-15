@@ -19,14 +19,19 @@ import (
 
 var numCPU = runtime.NumCPU()
 
+// Serve serves with event on incoming connections.
 func Serve(lis net.Listener, event *Event) error {
 	l := &Listener{Listener: lis, Event: event}
 	return l.Serve()
 }
 
+//Listener is a generic network listener for stream-oriented protocols.
 type Listener struct {
-	Listener     net.Listener
+	//Listener is a net.Listener.
+	Listener net.Listener
+	//Event is a handler event.
 	Event        *Event
+	listener     *listener
 	file         *os.File
 	fd           int
 	poll         *Poll
@@ -43,17 +48,18 @@ type Listener struct {
 	done         chan struct{}
 }
 
+// Serve serves with event on incoming connections.
 func (l *Listener) Serve() (err error) {
 	if l.Listener == nil {
 		return errors.New("listener is nil")
 	}
 	if l.Event == nil {
 		return errors.New("event is nil")
-	} else if l.Event.Handle == nil && l.Event.UpgradeHandle == nil {
-		return errors.New("need Handle or UpgradeHandle")
+	} else if l.Event.Handler == nil && l.Event.UpgradeHandler == nil {
+		return errors.New("need Handler or UpgradeHandler")
 	}
-	if l.Event.Buffer < 1 {
-		l.Event.Buffer = 0x10000
+	if l.Event.BufferSize < 1 {
+		l.Event.BufferSize = 0x10000
 	}
 	switch netListener := l.Listener.(type) {
 	case *net.TCPListener:
@@ -67,8 +73,8 @@ func (l *Listener) Serve() (err error) {
 			return err
 		}
 	default:
-		listener := &listener{Listener: l.Listener, Event: l.Event}
-		return listener.Serve()
+		l.listener = &listener{Listener: l.Listener, Event: l.Event}
+		return l.listener.Serve()
 	}
 	l.fd = int(l.file.Fd())
 	if err := syscall.SetNonblock(l.fd, true); err != nil {
@@ -101,19 +107,18 @@ func (l *Listener) Serve() (err error) {
 			conns:    make(map[int]*conn),
 			poll:     p,
 			events:   make([]PollEvent, 0x400),
-			handle:   l.Event.Handle,
 			async:    async,
 			done:     make(chan struct{}, 1),
 			jobs:     make(chan func()),
 			tasks:    make(chan struct{}, numCPU),
 		}
-		if w.listener.Event.UpgradeHandle == nil {
+		if w.listener.Event.UpgradeHandler == nil {
 			if w.async {
 				w.pool = &sync.Pool{New: func() interface{} {
-					return make([]byte, l.Event.Buffer)
+					return make([]byte, l.Event.BufferSize)
 				}}
 			} else {
-				w.buf = make([]byte, l.Event.Buffer)
+				w.buf = make([]byte, l.Event.BufferSize)
 			}
 		}
 		l.workers = append(l.workers, w)
@@ -318,9 +323,13 @@ func (l *Listener) reschedule() (stop bool) {
 	return false
 }
 
+// Close closes the listener.
 func (l *Listener) Close() error {
 	if !atomic.CompareAndSwapInt32(&l.closed, 0, 1) {
 		return nil
+	}
+	if l.listener != nil {
+		return l.listener.Close()
 	}
 	for i := 0; i < len(l.workers); i++ {
 		l.workers[i].Close()
@@ -345,7 +354,6 @@ type worker struct {
 	events   []PollEvent
 	pool     *sync.Pool
 	buf      []byte
-	handle   func(req []byte) (res []byte)
 	async    bool
 	jobs     chan func()
 	tasks    chan struct{}
@@ -449,7 +457,7 @@ func (w *worker) serve(ev PollEvent) error {
 		case WRITE:
 			w.write(c)
 		case READ:
-			if c.handle != nil {
+			if c.handler != nil {
 				w.handleConn(c)
 			} else {
 				w.read(c)
@@ -473,7 +481,7 @@ func (w *worker) write(c *conn) error {
 
 func (w *worker) handleConn(c *conn) error {
 	for {
-		err := c.handle()
+		err := c.handler()
 		if err != nil {
 			if err == syscall.EAGAIN {
 				return nil
@@ -536,7 +544,7 @@ func (w *worker) read(c *conn) error {
 }
 
 func (w *worker) do(c *conn, req []byte) {
-	res := w.handle(req)
+	res := w.listener.Event.Handler(req)
 	c.writing.Lock()
 	defer c.writing.Unlock()
 	if c.upgrade != nil {
@@ -548,7 +556,7 @@ func (w *worker) do(c *conn, req []byte) {
 
 func (w *worker) register(c *conn) error {
 	w.Increase(c)
-	if w.listener.Event.UpgradeConn != nil || w.listener.Event.UpgradeHandle != nil {
+	if w.listener.Event.UpgradeConn != nil || w.listener.Event.UpgradeHandler != nil {
 		if !atomic.CompareAndSwapInt32(&c.upgraded, 0, 1) {
 			return nil
 		}
@@ -567,11 +575,11 @@ func (w *worker) register(c *conn) error {
 					c.upgrade = upgrade
 				}
 			}
-			if w.listener.Event.UpgradeHandle != nil {
-				if handle, err := w.listener.Event.UpgradeHandle(c); err != nil {
+			if w.listener.Event.UpgradeHandler != nil {
+				if handler, err := w.listener.Event.UpgradeHandler(c); err != nil {
 					return
 				} else {
-					c.handle = handle
+					c.handler = handler
 				}
 			}
 			if err := syscall.SetNonblock(c.fd, true); err != nil {
@@ -637,7 +645,7 @@ type conn struct {
 	raddr    net.Addr
 	upgrade  net.Conn
 	upgraded int32
-	handle   func() error
+	handler  func() error
 	ready    int32
 	count    int64
 	score    int64

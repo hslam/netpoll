@@ -12,8 +12,10 @@ import (
 	"time"
 )
 
+// Tag is the poll type.
 var Tag = "kqueue"
 
+// Poll represents the poll that supports non-blocking I/O on file descriptors with polling.
 type Poll struct {
 	fd      int
 	events  []syscall.Kevent_t
@@ -21,6 +23,7 @@ type Poll struct {
 	timeout *syscall.Timespec
 }
 
+// Create creates a new poll.
 func Create() (*Poll, error) {
 	fd, err := syscall.Kqueue()
 	if err != nil {
@@ -36,6 +39,7 @@ func Create() (*Poll, error) {
 	}, nil
 }
 
+// SetTimeout sets the wait timeout.
 func (p *Poll) SetTimeout(d time.Duration) (err error) {
 	if d < time.Millisecond {
 		return errors.New("non-positive interval for SetTimeout")
@@ -45,6 +49,7 @@ func (p *Poll) SetTimeout(d time.Duration) (err error) {
 	return nil
 }
 
+// Register registers a file descriptor.
 func (p *Poll) Register(fd int) (err error) {
 	changes := p.pool.Get().([]syscall.Kevent_t)
 	defer p.pool.Put(changes)
@@ -53,6 +58,7 @@ func (p *Poll) Register(fd int) (err error) {
 	return
 }
 
+// Write adds a write event.
 func (p *Poll) Write(fd int) (err error) {
 	changes := p.pool.Get().([]syscall.Kevent_t)
 	defer p.pool.Put(changes)
@@ -61,6 +67,7 @@ func (p *Poll) Write(fd int) (err error) {
 	return
 }
 
+// Unregister unregisters a file descriptor.
 func (p *Poll) Unregister(fd int) (err error) {
 	changes := p.pool.Get().([]syscall.Kevent_t)
 	defer p.pool.Put(changes)
@@ -70,6 +77,7 @@ func (p *Poll) Unregister(fd int) (err error) {
 	return
 }
 
+// Wait waits events.
 func (p *Poll) Wait(events []PollEvent) (n int, err error) {
 	if cap(p.events) >= len(events) {
 		p.events = p.events[:len(events)]
@@ -97,6 +105,8 @@ func (p *Poll) Wait(events []PollEvent) (n int, err error) {
 	return
 }
 
+// Close closes the poll fd. The underlying file descriptor is closed by the
+// destroy method when there are no remaining references.
 func (p *Poll) Close() error {
 	return syscall.Close(p.fd)
 }

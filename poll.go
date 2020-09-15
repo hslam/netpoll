@@ -1,17 +1,23 @@
 // Copyright (c) 2020 Meng Huang (mhboy@outlook.com)
 // This package is licensed under a MIT license that can be found in the LICENSE file.
 
-// Package netpoll implements network poller base on epoll/kqueue.
+// Package netpoll implements a network poller base on epoll/kqueue.
 package netpoll
 
+// Mode represents the read/write mode.
 type Mode int
 
 const (
+	// READ is the read mode.
 	READ Mode = 1 << iota
+	// WRITE is the write mode.
 	WRITE
 )
 
+// PollEvent represents the poll event for the poller.
 type PollEvent struct {
-	Fd   int
+	// Fd is a file descriptor.
+	Fd int
+	// Mode represents the event mode.
 	Mode Mode
 }

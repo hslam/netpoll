@@ -1,14 +1,14 @@
 # netpoll
-Package netpoll implements network poller base on epoll/kqueue.
+Package netpoll implements a network poller base on epoll/kqueue.
 
 ## Features
 
 * Epoll/Kqueue
 * TCP/UNIX
-* Compatible With The net.Conn
+* Compatible with the net.Conn
 * Upgrade Connection
 * Non-Blocking I/O
-* Async Handle
+* Sync/Async Workers
 * Rescheduling Workers
 
 ## Get started
@@ -37,7 +37,7 @@ func main() {
 		panic(err)
 	}
 	netpoll.Serve(lis, &netpoll.Event{
-		Handle: func(req []byte) (res []byte) {
+		Handler: func(req []byte) (res []byte) {
 			res = req
 			return
 		},
