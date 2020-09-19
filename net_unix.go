@@ -483,7 +483,7 @@ func (w *worker) handleConn(c *conn) error {
 			if !atomic.CompareAndSwapInt32(&c.closing, 0, 1) {
 				return nil
 			}
-			w.decrease(c)
+			w.Decrease(c)
 			c.Close()
 			return nil
 		}
