@@ -661,7 +661,7 @@ func (c *conn) Read(b []byte) (n int, err error) {
 	c.rlock.Lock()
 	defer c.rlock.Unlock()
 	n, err = syscall.Read(c.fd, b)
-	if n == 0 {
+	if n == 0 || err == syscall.EBADF {
 		err = EOF
 	}
 	if n < 0 {
