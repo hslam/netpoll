@@ -29,12 +29,16 @@ package main
 import "github.com/hslam/netpoll"
 
 func main() {
-	if err := netpoll.ListenAndServe("tcp", ":9999", &netpoll.Event{
-		Handler: func(req []byte) (res []byte) {
+	var handler = &netpoll.DataHandler{
+		Shared:     false,
+		NoCopy:     true,
+		BufferSize: 1024,
+		HandlerFunc: func(req []byte) (res []byte) {
 			res = req
 			return
 		},
-	}); err != nil {
+	}
+	if err := netpoll.ListenAndServe("tcp", ":9999", handler); err != nil {
 		panic(err)
 	}
 }
