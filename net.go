@@ -10,6 +10,10 @@ import (
 	"syscall"
 )
 
+const (
+	bufferSize = 0x10000
+)
+
 // EOF is the error returned by Read when no more input is available.
 var EOF = io.EOF
 
@@ -65,7 +69,7 @@ func (l *listener) Serve() (err error) {
 		return errors.New("need Handler or UpgradeHandler")
 	}
 	if l.Event.BufferSize < 1 {
-		l.Event.BufferSize = 0x10000
+		l.Event.BufferSize = bufferSize
 	}
 	for {
 		conn, err := l.Listener.Accept()
