@@ -73,7 +73,7 @@ func (p *Poll) Unregister(fd int) (err error) {
 }
 
 // Wait waits events.
-func (p *Poll) Wait(events []PollEvent) (n int, err error) {
+func (p *Poll) Wait(events []Event) (n int, err error) {
 	if cap(p.events) >= len(events) {
 		p.events = p.events[:len(events)]
 	} else {

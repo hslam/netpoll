@@ -43,7 +43,7 @@ func (p *Poll) Unregister(fd int) (err error) {
 }
 
 // Wait waits events.
-func (p *Poll) Wait(events []PollEvent) (n int, err error) {
+func (p *Poll) Wait(events []Event) (n int, err error) {
 	return
 }
 

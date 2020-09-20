@@ -97,7 +97,7 @@ func (l *Listener) Serve() (err error) {
 			listener: l,
 			conns:    make(map[int]*conn),
 			poll:     p,
-			events:   make([]PollEvent, 0x400),
+			events:   make([]Event, 0x400),
 			async:    async,
 			done:     make(chan struct{}, 1),
 			jobs:     make(chan func()),
@@ -107,7 +107,7 @@ func (l *Listener) Serve() (err error) {
 	}
 	l.done = make(chan struct{}, 1)
 	var n int
-	var events = make([]PollEvent, 1)
+	var events = make([]Event, 1)
 	for err == nil {
 		if n, err = l.poll.Wait(events); n > 0 {
 			if events[0].Fd == l.fd {
@@ -333,7 +333,7 @@ type worker struct {
 	mu       sync.Mutex
 	conns    map[int]*conn
 	poll     *Poll
-	events   []PollEvent
+	events   []Event
 	async    bool
 	jobs     chan func()
 	tasks    chan struct{}
@@ -419,7 +419,7 @@ func (w *worker) run(wg *sync.WaitGroup) {
 	}
 }
 
-func (w *worker) serve(ev PollEvent) error {
+func (w *worker) serve(ev Event) error {
 	fd := ev.Fd
 	if fd == 0 {
 		return nil

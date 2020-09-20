@@ -14,8 +14,8 @@ const (
 	WRITE
 )
 
-// PollEvent represents the poll event for the poller.
-type PollEvent struct {
+// Event represents the poll event for the poller.
+type Event struct {
 	// Fd is a file descriptor.
 	Fd int
 	// Mode represents the event mode.
