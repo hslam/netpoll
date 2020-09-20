@@ -9,17 +9,17 @@ import (
 	"net"
 )
 
-//Listener is a generic network listener for stream-oriented protocols.
+// Listener is a generic network listener for stream-oriented protocols.
 type Listener struct {
-	//Listener is a net.Listener.
+	// Listener is a net.Listener.
 	Listener net.Listener
-	//Event is a handler event.
-	Event *Event
+	// Handler responds to a single request.
+	Handler Handler
 }
 
-// Serve serves with event on incoming connections.
+// Serve serves with handler on incoming connections.
 func (l *Listener) Serve() (err error) {
-	listener := &listener{Listener: l.Listener, Event: l.Event}
+	listener := &listener{Listener: l.Listener, Handler: l.Handler}
 	return listener.Serve()
 }
 
