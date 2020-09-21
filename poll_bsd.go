@@ -15,6 +15,9 @@ import (
 // Tag is the poll type.
 var Tag = "kqueue"
 
+// ErrTimeout is the error returned by SetTimeout when time.Duration d < time.Millisecond.
+var ErrTimeout = errors.New("non-positive interval for SetTimeout")
+
 // Poll represents the poll that supports non-blocking I/O on file descriptors with polling.
 type Poll struct {
 	fd      int
@@ -42,7 +45,7 @@ func Create() (*Poll, error) {
 // SetTimeout sets the wait timeout.
 func (p *Poll) SetTimeout(d time.Duration) (err error) {
 	if d < time.Millisecond {
-		return errors.New("non-positive interval for SetTimeout")
+		return ErrTimeout
 	}
 	p.timeout.Sec = int64(d / time.Second)
 	p.timeout.Nsec = int64(d % time.Second)
