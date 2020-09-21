@@ -20,18 +20,28 @@ var EOF = io.EOF
 // EAGAIN is the error when resource temporarily unavailable
 var EAGAIN = syscall.EAGAIN
 
-// ErrServerClosed is returned by the Server's Serve, ServeTLS, ListenAndServe,
-// and ListenAndServeTLS methods after a call to Shutdown or Close.
+// ErrServerClosed is returned by the Server's Serve and ListenAndServe
+// methods after a call to Close.
 var ErrServerClosed = errors.New("Server closed")
 
-// ListenAndServe listens on the network address and then serves
-// incoming connections with event.
+// ListenAndServe listens on the network address and then calls
+// Serve with handler to handle requests on incoming connections.
+//
+// The handler must be not nil.
+//
+// ListenAndServe always returns a non-nil error.
 func ListenAndServe(network, address string, handler Handler) error {
 	server := &Server{Network: network, Address: address, Handler: handler}
 	return server.ListenAndServe()
 }
 
-// Serve serves incoming connections with event on the listener lis.
+// Serve accepts incoming connections on the listener l,
+// and registers the conn fd to poll. The poll will trigger the fd to
+// read requests and then call handler to reply to them.
+//
+// The handler must be not nil.
+//
+// Serve always returns a non-nil error.
 func Serve(lis net.Listener, handler Handler) error {
 	server := &Server{Handler: handler}
 	return server.Serve(lis)

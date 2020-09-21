@@ -45,7 +45,11 @@ type Server struct {
 	done         chan struct{}
 }
 
-// ListenAndServe listens and then calls Serve on incoming connections
+// ListenAndServe listens on the network address and then calls
+// Serve with handler to handle requests on incoming connections.
+//
+// ListenAndServe always returns a non-nil error.
+// After Close the returned error is ErrServerClosed.
 func (s *Server) ListenAndServe() error {
 	if atomic.LoadInt32(&s.closed) != 0 {
 		return ErrServerClosed
@@ -57,7 +61,14 @@ func (s *Server) ListenAndServe() error {
 	return s.Serve(ln)
 }
 
-// Serve serves with handler on incoming connections.
+// Serve accepts incoming connections on the listener l,
+// and registers the conn fd to poll. The poll will trigger the fd to
+// read requests and then call handler to reply to them.
+//
+// The handler must be not nil.
+//
+// Serve always returns a non-nil error.
+// After Close the returned error is ErrServerClosed.
 func (s *Server) Serve(l net.Listener) (err error) {
 	if atomic.LoadInt32(&s.closed) != 0 {
 		return ErrServerClosed
