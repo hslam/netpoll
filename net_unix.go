@@ -19,15 +19,16 @@ import (
 
 var numCPU = runtime.NumCPU()
 
-// Listener is a generic network listener for stream-oriented protocols.
-type Listener struct {
-	// Listener is a net.Listener.
-	Listener net.Listener
+// Server defines parameters for running a server.
+type Server struct {
+	Network string
+	Address string
 	// Handler responds to a single request.
 	Handler Handler
 	// NoAsync disables async workers.
 	NoAsync      bool
-	listener     *listener
+	listener     net.Listener
+	netServer    *netServer
 	file         *os.File
 	fd           int
 	poll         *Poll
@@ -44,84 +45,99 @@ type Listener struct {
 	done         chan struct{}
 }
 
-// Serve serves with handler on incoming connections.
-func (l *Listener) Serve() (err error) {
-	if l.Listener == nil {
-		return errors.New("Listener is nil")
+// ListenAndServe listens and then calls Serve on incoming connections
+func (s *Server) ListenAndServe() error {
+	if atomic.LoadInt32(&s.closed) != 0 {
+		return ErrServerClosed
 	}
-	if l.Handler == nil {
+	ln, err := net.Listen(s.Network, s.Address)
+	if err != nil {
+		return err
+	}
+	return s.Serve(ln)
+}
+
+// Serve serves with handler on incoming connections.
+func (s *Server) Serve(l net.Listener) (err error) {
+	if atomic.LoadInt32(&s.closed) != 0 {
+		return ErrServerClosed
+	}
+	s.listener = l
+	if s.listener == nil {
+		return errors.New("Listener is nil")
+	} else if s.Handler == nil {
 		return errors.New("Handler is nil")
 	}
-	switch netListener := l.Listener.(type) {
+	switch netListener := s.listener.(type) {
 	case *net.TCPListener:
-		if l.file, err = netListener.File(); err != nil {
-			l.Listener.Close()
+		if s.file, err = netListener.File(); err != nil {
+			s.listener.Close()
 			return err
 		}
 	case *net.UnixListener:
-		if l.file, err = netListener.File(); err != nil {
-			l.Listener.Close()
+		if s.file, err = netListener.File(); err != nil {
+			s.listener.Close()
 			return err
 		}
 	default:
-		l.listener = &listener{Listener: l.Listener, Handler: l.Handler}
-		return l.listener.Serve()
+		s.netServer = &netServer{Handler: s.Handler}
+		return s.netServer.Serve(l)
 	}
-	l.fd = int(l.file.Fd())
-	if err := syscall.SetNonblock(l.fd, true); err != nil {
-		l.Listener.Close()
+	s.fd = int(s.file.Fd())
+	if err := syscall.SetNonblock(s.fd, true); err != nil {
+		s.listener.Close()
 		return err
 	}
-	l.syncWorkers = 16
+	s.syncWorkers = 16
 	if numCPU > 16 {
-		l.syncWorkers = uint(numCPU)
+		s.syncWorkers = uint(numCPU)
 	}
-	if l.poll, err = Create(); err != nil {
+	if s.poll, err = Create(); err != nil {
 		return err
 	}
-	l.poll.Register(l.fd)
-	if !l.NoAsync && l.syncWorkers > 0 {
-		l.rescheduled = true
+	s.poll.Register(s.fd)
+	if !s.NoAsync && s.syncWorkers > 0 {
+		s.rescheduled = true
 	}
-	for i := 0; i < int(l.syncWorkers)+numCPU; i++ {
+	for i := 0; i < int(s.syncWorkers)+numCPU; i++ {
 		p, err := Create()
 		if err != nil {
 			return err
 		}
 		var async bool
-		if i >= int(l.syncWorkers) && !l.NoAsync {
+		if i >= int(s.syncWorkers) && !s.NoAsync {
 			async = true
 		}
 		w := &worker{
-			index:    i,
-			listener: l,
-			conns:    make(map[int]*conn),
-			poll:     p,
-			events:   make([]Event, 0x400),
-			async:    async,
-			done:     make(chan struct{}, 1),
-			jobs:     make(chan func()),
-			tasks:    make(chan struct{}, numCPU),
+			index:  i,
+			server: s,
+			conns:  make(map[int]*conn),
+			poll:   p,
+			events: make([]Event, 0x400),
+			async:  async,
+			done:   make(chan struct{}, 1),
+			jobs:   make(chan func()),
+			tasks:  make(chan struct{}, numCPU),
 		}
-		l.workers = append(l.workers, w)
+		s.workers = append(s.workers, w)
 	}
-	l.done = make(chan struct{}, 1)
+	s.done = make(chan struct{}, 1)
 	var n int
 	var events = make([]Event, 1)
 	for err == nil {
-		if n, err = l.poll.Wait(events); n > 0 {
-			if events[0].Fd == l.fd {
-				err = l.accept()
+		if n, err = s.poll.Wait(events); n > 0 {
+			if events[0].Fd == s.fd {
+				err = s.accept()
 			}
 			runtime.Gosched()
 		}
 	}
-	l.wg.Wait()
+	s.wg.Wait()
 	return nil
 }
 
-func (l *Listener) accept() (err error) {
-	nfd, sa, err := syscall.Accept(l.fd)
+func (s *Server) accept() (err error) {
+	nfd, sa, err := syscall.Accept(s.fd)
 	if err != nil {
 		if err == syscall.EAGAIN {
 			return nil
@@ -151,87 +167,87 @@ func (l *Listener) accept() (err error) {
 			Zone: zone,
 		}
 	}
-	w := l.assignWorker()
-	w.Wake(&l.wg)
-	return w.register(&conn{w: w, fd: nfd, raddr: raddr, laddr: l.Listener.Addr()})
+	w := s.assignWorker()
+	w.Wake(&s.wg)
+	return w.register(&conn{w: w, fd: nfd, raddr: raddr, laddr: s.listener.Addr()})
 }
 
-func (l *Listener) assignWorker() (w *worker) {
-	if w := l.idleSyncWorker(); w != nil {
+func (s *Server) assignWorker() (w *worker) {
+	if w := s.idleSyncWorker(); w != nil {
 		return w
 	}
-	return l.leastConnectedAsyncWorker()
+	return s.leastConnectedAsyncWorker()
 }
 
-func (l *Listener) idleSyncWorker() (w *worker) {
-	if l.syncWorkers > 0 {
-		for i := 0; i < int(l.syncWorkers); i++ {
-			if l.workers[i].count < 1 {
-				return l.workers[i]
+func (s *Server) idleSyncWorker() (w *worker) {
+	if s.syncWorkers > 0 {
+		for i := 0; i < int(s.syncWorkers); i++ {
+			if s.workers[i].count < 1 {
+				return s.workers[i]
 			}
 		}
 	}
 	return nil
 }
 
-func (l *Listener) leastConnectedAsyncWorker() (w *worker) {
-	min := l.workers[l.syncWorkers].count
-	index := int(l.syncWorkers)
-	if len(l.workers) > int(l.syncWorkers) {
-		for i := int(l.syncWorkers) + 1; i < len(l.workers); i++ {
-			if l.workers[i].count < min {
-				min = l.workers[i].count
+func (s *Server) leastConnectedAsyncWorker() (w *worker) {
+	min := s.workers[s.syncWorkers].count
+	index := int(s.syncWorkers)
+	if len(s.workers) > int(s.syncWorkers) {
+		for i := int(s.syncWorkers) + 1; i < len(s.workers); i++ {
+			if s.workers[i].count < min {
+				min = s.workers[i].count
 				index = i
 			}
 		}
 	}
-	return l.workers[index]
+	return s.workers[index]
 }
 
-func (l *Listener) wakeReschedule() {
-	if !l.rescheduled {
+func (s *Server) wakeReschedule() {
+	if !s.rescheduled {
 		return
 	}
-	l.lock.Lock()
-	if !l.wake {
-		l.wake = true
-		l.lock.Unlock()
+	s.lock.Lock()
+	if !s.wake {
+		s.wake = true
+		s.lock.Unlock()
 		go func() {
 			ticker := time.NewTicker(time.Millisecond * 100)
 			for {
 				select {
 				case <-ticker.C:
-					stop := l.reschedule()
+					stop := s.reschedule()
 					if stop {
-						l.lock.Lock()
-						l.wake = false
+						s.lock.Lock()
+						s.wake = false
 						ticker.Stop()
-						l.lock.Unlock()
+						s.lock.Unlock()
 						return
 					}
-				case <-l.done:
+				case <-s.done:
 					ticker.Stop()
 					return
 				}
 			}
 		}()
 	} else {
-		l.lock.Unlock()
+		s.lock.Unlock()
 	}
 }
 
-func (l *Listener) reschedule() (stop bool) {
-	if !l.rescheduled {
+func (s *Server) reschedule() (stop bool) {
+	if !s.rescheduled {
 		return
 	}
-	if !atomic.CompareAndSwapInt32(&l.rescheduling, 0, 1) {
+	if !atomic.CompareAndSwapInt32(&s.rescheduling, 0, 1) {
 		return false
 	}
-	defer atomic.StoreInt32(&l.rescheduling, 0)
-	l.adjust = l.adjust[:0]
-	l.list = l.list[:0]
+	defer atomic.StoreInt32(&s.rescheduling, 0)
+	s.adjust = s.adjust[:0]
+	s.list = s.list[:0]
 	sum := int64(0)
-	for idx, w := range l.workers {
+	for idx, w := range s.workers {
 		w.lock.Lock()
 		running := w.running
 		w.lock.Unlock()
@@ -240,108 +256,108 @@ func (l *Listener) reschedule() (stop bool) {
 		}
 		w.mu.Lock()
 		for _, conn := range w.conns {
-			if uint(idx) < l.syncWorkers {
-				l.adjust = append(l.adjust, conn)
+			if uint(idx) < s.syncWorkers {
+				s.adjust = append(s.adjust, conn)
 			}
 			conn.score = atomic.LoadInt64(&conn.count)
 			atomic.StoreInt64(&conn.count, 0)
 			sum += conn.score
-			l.list = append(l.list, conn)
+			s.list = append(s.list, conn)
 		}
 		w.mu.Unlock()
 	}
-	if len(l.list) == 0 || sum == 0 {
+	if len(s.list) == 0 || sum == 0 {
 		return true
 	}
-	sort.Sort(l.list)
-	syncWorkers := l.syncWorkers
-	if uint(len(l.list)) < l.syncWorkers {
-		syncWorkers = uint(len(l.list))
+	sort.Sort(s.list)
+	syncWorkers := s.syncWorkers
+	if uint(len(s.list)) < s.syncWorkers {
+		syncWorkers = uint(len(s.list))
 	}
 	index := 0
-	for _, conn := range l.list[:syncWorkers] {
+	for _, conn := range s.list[:syncWorkers] {
 		conn.lock.Lock()
 		if conn.w.async {
 			conn.lock.Unlock()
-			l.list[index] = conn
+			s.list[index] = conn
 			index++
 		} else {
 			conn.lock.Unlock()
-			if len(l.adjust) > 0 {
-				for i := 0; i < len(l.adjust); i++ {
-					if conn == l.adjust[i] {
-						if i < len(l.adjust)-1 {
-							copy(l.adjust[i:], l.adjust[i+1:])
+			if len(s.adjust) > 0 {
+				for i := 0; i < len(s.adjust); i++ {
+					if conn == s.adjust[i] {
+						if i < len(s.adjust)-1 {
+							copy(s.adjust[i:], s.adjust[i+1:])
 						}
-						l.adjust = l.adjust[:len(l.adjust)-1]
+						s.adjust = s.adjust[:len(s.adjust)-1]
 						break
 					}
 				}
 			}
 		}
 	}
-	var reschedules = l.list[:index]
-	if len(reschedules) == 0 || len(reschedules) != len(l.adjust) {
+	var reschedules = s.list[:index]
+	if len(reschedules) == 0 || len(reschedules) != len(s.adjust) {
 		return false
 	}
 	for i := 0; i < len(reschedules); i++ {
-		l.adjust[i].lock.Lock()
+		s.adjust[i].lock.Lock()
 		reschedules[i].lock.Lock()
-		syncWorker := l.adjust[i].w
+		syncWorker := s.adjust[i].w
 		asyncWorker := reschedules[i].w
 		syncWorker.mu.Lock()
 		asyncWorker.mu.Lock()
-		syncWorker.decrease(l.adjust[i])
-		l.adjust[i].w = asyncWorker
-		asyncWorker.increase(l.adjust[i])
+		syncWorker.decrease(s.adjust[i])
+		s.adjust[i].w = asyncWorker
+		asyncWorker.increase(s.adjust[i])
 		asyncWorker.decrease(reschedules[i])
 		reschedules[i].w = syncWorker
 		syncWorker.increase(reschedules[i])
 		asyncWorker.mu.Unlock()
 		syncWorker.mu.Unlock()
-		l.adjust[i].lock.Unlock()
+		s.adjust[i].lock.Unlock()
 		reschedules[i].lock.Unlock()
 	}
 	return false
 }
 
 // Close closes the listener.
-func (l *Listener) Close() error {
-	if !atomic.CompareAndSwapInt32(&l.closed, 0, 1) {
+func (s *Server) Close() error {
+	if !atomic.CompareAndSwapInt32(&s.closed, 0, 1) {
 		return nil
 	}
-	if l.listener != nil {
-		return l.listener.Close()
+	if s.netServer != nil {
+		return s.netServer.Close()
 	}
-	for i := 0; i < len(l.workers); i++ {
-		l.workers[i].Close()
+	for i := 0; i < len(s.workers); i++ {
+		s.workers[i].Close()
 	}
-	if err := l.Listener.Close(); err != nil {
+	if err := s.listener.Close(); err != nil {
 		return err
 	}
-	if err := l.file.Close(); err != nil {
+	if err := s.file.Close(); err != nil {
 		return err
 	}
-	close(l.done)
-	return l.poll.Close()
+	close(s.done)
+	return s.poll.Close()
 }
 
 type worker struct {
-	index    int
-	listener *Listener
-	count    int64
-	mu       sync.Mutex
-	conns    map[int]*conn
-	poll     *Poll
-	events   []Event
-	async    bool
-	jobs     chan func()
-	tasks    chan struct{}
-	done     chan struct{}
-	lock     sync.Mutex
-	running  bool
-	slept    int32
-	closed   int32
+	index   int
+	server  *Server
+	count   int64
+	mu      sync.Mutex
+	conns   map[int]*conn
+	poll    *Poll
+	events  []Event
+	async   bool
+	jobs    chan func()
+	tasks   chan struct{}
+	done    chan struct{}
+	lock    sync.Mutex
+	running bool
+	slept   int32
+	closed  int32
 }
 
 func (w *worker) task(job func()) {
@@ -406,7 +422,7 @@ func (w *worker) run(wg *sync.WaitGroup) {
 			}
 		}
 		if n > 0 && w.async {
-			w.listener.wakeReschedule()
+			w.server.wakeReschedule()
 		}
 		if atomic.LoadInt64(&w.count) < 1 {
 			w.lock.Lock()
@@ -444,7 +460,7 @@ func (w *worker) serve(ev Event) error {
 
 func (w *worker) serveConn(c *conn) error {
 	for {
-		err := w.listener.Handler.Serve(c.context)
+		err := w.server.Handler.Serve(c.context)
 		if err != nil {
 			if err == syscall.EAGAIN {
 				return nil
@@ -472,7 +488,7 @@ func (w *worker) register(c *conn) error {
 		if err := syscall.SetNonblock(c.fd, false); err != nil {
 			return
 		}
-		ctx, err := w.listener.Handler.Upgrade(c)
+		ctx, err := w.server.Handler.Upgrade(c)
 		if err != nil {
 			w.Decrease(c)
 			c.Close()
@@ -546,7 +562,7 @@ func (c *conn) Read(b []byte) (n int, err error) {
 		return 0, nil
 	}
 	c.lock.Lock()
-	if c.w.listener.rescheduled {
+	if c.w.server.rescheduled {
 		c.lock.Unlock()
 		atomic.AddInt64(&c.count, 1)
 	} else {

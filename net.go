@@ -20,20 +20,32 @@ var EOF = io.EOF
 // EAGAIN is the error when resource temporarily unavailable
 var EAGAIN = syscall.EAGAIN
 
-type listener struct {
-	Listener net.Listener
+// ErrServerClosed is returned by the Server's Serve, ServeTLS, ListenAndServe,
+// and ListenAndServeTLS methods after a call to Shutdown or Close.
+var ErrServerClosed = errors.New("Server closed")
+
+// ListenAndServe listens on the network address and then serves
+// incoming connections with event.
+func ListenAndServe(network, address string, handler Handler) error {
+	server := &Server{Network: network, Address: address, Handler: handler}
+	return server.ListenAndServe()
+}
+
+// Serve serves incoming connections with event on the listener lis.
+func Serve(lis net.Listener, handler Handler) error {
+	server := &Server{Handler: handler}
+	return server.Serve(lis)
+}
+
+type netServer struct {
+	listener net.Listener
 	Handler  Handler
 }
 
-func (l *listener) Serve() (err error) {
-	if l.Listener == nil {
-		return errors.New("Listener is nil")
-	}
-	if l.Handler == nil {
-		return errors.New("Handler is nil")
-	}
+func (s *netServer) Serve(l net.Listener) (err error) {
+	s.listener = l
 	for {
-		conn, err := l.Listener.Accept()
+		conn, err := s.listener.Accept()
 		if err != nil {
 			continue
 		}
@@ -44,12 +56,12 @@ func (l *listener) Serve() (err error) {
 			}()
 			var err error
 			var context Context
-			if context, err = l.Handler.Upgrade(c); err != nil {
+			if context, err = s.Handler.Upgrade(c); err != nil {
 				c.Close()
 				return
 			}
 			for err == nil {
-				err = l.Handler.Serve(context)
+				err = s.Handler.Serve(context)
 			}
 			c.Close()
 		}(conn)
@@ -57,6 +69,6 @@ func (l *listener) Serve() (err error) {
 	return nil
 }
 
-func (l *listener) Close() error {
-	return l.Listener.Close()
+func (l *netServer) Close() error {
+	return l.listener.Close()
 }
