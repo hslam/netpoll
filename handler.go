@@ -13,6 +13,12 @@ import (
 // ErrHandlerFunc is the error when the HandlerFunc is nil
 var ErrHandlerFunc = errors.New("HandlerFunc must be not nil")
 
+// ErrUpgradeFunc is the error when the Upgrade func is nil
+var ErrUpgradeFunc = errors.New("Upgrade function must be not nil")
+
+// ErrServeFunc is the error when the Serve func is nil
+var ErrServeFunc = errors.New("Serve function must be not nil")
+
 var (
 	buffers = sync.Map{}
 	assign  int32
@@ -47,19 +53,40 @@ type Handler interface {
 
 // NewHandler returns a new Handler.
 func NewHandler(upgrade func(net.Conn) (Context, error), serve func(Context) error) Handler {
-	return &handler{upgrade: upgrade, serve: serve}
+	return &ConnHandler{upgrade: upgrade, serve: serve}
 }
 
-type handler struct {
+// ConnHandler implements the Handler interface.
+type ConnHandler struct {
 	upgrade func(net.Conn) (Context, error)
 	serve   func(Context) error
 }
 
-func (h *handler) Upgrade(conn net.Conn) (Context, error) {
+// SetUpgrade sets the Upgrade function.
+func (h *ConnHandler) SetUpgrade(upgrade func(net.Conn) (Context, error)) *ConnHandler {
+	h.upgrade = upgrade
+	return h
+}
+
+// SetServe sets the Serve function.
+func (h *ConnHandler) SetServe(serve func(Context) error) *ConnHandler {
+	h.serve = serve
+	return h
+}
+
+// Upgrade implements the Handler Upgrade method.
+func (h *ConnHandler) Upgrade(conn net.Conn) (Context, error) {
+	if h.upgrade == nil {
+		return nil, ErrUpgradeFunc
+	}
 	return h.upgrade(conn)
 }
 
-func (h *handler) Serve(ctx Context) error {
+// Serve implements the Handler Serve method.
+func (h *ConnHandler) Serve(ctx Context) error {
+	if h.serve == nil {
+		return ErrServeFunc
+	}
 	return h.serve(ctx)
 }
 
