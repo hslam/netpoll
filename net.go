@@ -24,6 +24,12 @@ var EAGAIN = syscall.EAGAIN
 // methods after a call to Close.
 var ErrServerClosed = errors.New("Server closed")
 
+// ErrHandler is the error when the Handler is nil
+var ErrHandler = errors.New("Handler must be not nil")
+
+// ErrListener is the error when the Listener is nil
+var ErrListener = errors.New("Listener must be not nil")
+
 // ListenAndServe listens on the network address and then calls
 // Serve with handler to handle requests on incoming connections.
 //
@@ -57,7 +63,7 @@ func (s *netServer) Serve(l net.Listener) (err error) {
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
-			continue
+			break
 		}
 		go func(c net.Conn) {
 			defer func() {

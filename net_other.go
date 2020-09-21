@@ -47,10 +47,10 @@ func (s *Server) ListenAndServe() error {
 // After Close the returned error is ErrServerClosed.
 func (s *Server) Serve(l net.Listener) (err error) {
 	if l == nil {
-		return errors.New("Listener is nil")
+		return ErrListener
 	}
 	if s.Handler == nil {
-		return errors.New("Handler is nil")
+		return ErrHandler
 	}
 	if atomic.LoadInt32(&s.closed) != 0 {
 		return ErrServerClosed

@@ -75,9 +75,9 @@ func (s *Server) Serve(l net.Listener) (err error) {
 	}
 	s.listener = l
 	if s.listener == nil {
-		return errors.New("Listener is nil")
+		return ErrListener
 	} else if s.Handler == nil {
-		return errors.New("Handler is nil")
+		return ErrHandler
 	}
 	switch netListener := s.listener.(type) {
 	case *net.TCPListener:
@@ -488,9 +488,6 @@ func (w *worker) serveConn(c *conn) error {
 
 func (w *worker) register(c *conn) error {
 	w.Increase(c)
-	if !atomic.CompareAndSwapInt32(&c.upgraded, 0, 1) {
-		return nil
-	}
 	go func(w *worker, c *conn) {
 		defer func() {
 			if e := recover(); e != nil {
@@ -552,20 +549,19 @@ func (w *worker) Close() {
 }
 
 type conn struct {
-	lock     sync.Mutex
-	w        *worker
-	rlock    sync.Mutex
-	wlock    sync.Mutex
-	fd       int
-	laddr    net.Addr
-	raddr    net.Addr
-	upgraded int32
-	context  Context
-	ready    int32
-	count    int64
-	score    int64
-	closing  int32
-	closed   int32
+	lock    sync.Mutex
+	w       *worker
+	rlock   sync.Mutex
+	wlock   sync.Mutex
+	fd      int
+	laddr   net.Addr
+	raddr   net.Addr
+	context Context
+	ready   int32
+	count   int64
+	score   int64
+	closing int32
+	closed  int32
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
