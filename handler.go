@@ -151,9 +151,6 @@ func (h *DataHandler) Serve(ctx Context) error {
 		copy(req, buf[:n])
 	}
 	res := h.HandlerFunc(req)
-	if len(res) == 0 {
-		return nil
-	}
 	_, err = conn.Write(res)
 	return err
 }
