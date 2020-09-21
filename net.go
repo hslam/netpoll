@@ -79,6 +79,6 @@ func (s *netServer) Serve(l net.Listener) (err error) {
 	return nil
 }
 
-func (l *netServer) Close() error {
-	return l.listener.Close()
+func (s *netServer) Close() error {
+	return s.listener.Close()
 }
