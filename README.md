@@ -5,7 +5,7 @@ Package netpoll implements a network poller base on epoll/kqueue.
 
 * Epoll/Kqueue
 * TCP/UNIX
-* Compatible with the net.Conn
+* Fully compatible with the net.Conn
 * Upgrade Connection
 * Non-Blocking I/O
 * Sync/Async Workers
