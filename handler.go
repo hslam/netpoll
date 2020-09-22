@@ -62,13 +62,13 @@ type ConnHandler struct {
 	serve   func(Context) error
 }
 
-// SetUpgrade sets the Upgrade function.
+// SetUpgrade sets the Upgrade function for upgrading the net.Conn.
 func (h *ConnHandler) SetUpgrade(upgrade func(net.Conn) (Context, error)) *ConnHandler {
 	h.upgrade = upgrade
 	return h
 }
 
-// SetServe sets the Serve function.
+// SetServe sets the Serve function for once serving.
 func (h *ConnHandler) SetServe(serve func(Context) error) *ConnHandler {
 	h.serve = serve
 	return h
@@ -100,6 +100,7 @@ type DataHandler struct {
 	NoCopy bool
 	// BufferSize represents the buffer size.
 	BufferSize int
+	upgrade    func(net.Conn) (net.Conn, error)
 	// HandlerFunc is the data Serve function.
 	HandlerFunc func(req []byte) (res []byte)
 }
@@ -110,6 +111,11 @@ type context struct {
 	buffer []byte
 }
 
+// SetUpgrade sets the Upgrade function for upgrading the net.Conn.
+func (h *DataHandler) SetUpgrade(upgrade func(net.Conn) (net.Conn, error)) {
+	h.upgrade = upgrade
+}
+
 // Upgrade sets the net.Conn to a Context.
 func (h *DataHandler) Upgrade(conn net.Conn) (Context, error) {
 	if h.BufferSize < 1 {
@@ -117,6 +123,13 @@ func (h *DataHandler) Upgrade(conn net.Conn) (Context, error) {
 	}
 	if h.HandlerFunc == nil {
 		return nil, ErrHandlerFunc
+	}
+	if h.upgrade != nil {
+		c, err := h.upgrade(conn)
+		if err != nil {
+			return nil, err
+		}
+		conn = c
 	}
 	var ctx = &context{conn: conn}
 	if h.Shared {
