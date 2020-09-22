@@ -128,8 +128,9 @@ func (h *DataHandler) Upgrade(conn net.Conn) (Context, error) {
 		c, err := h.upgrade(conn)
 		if err != nil {
 			return nil, err
+		} else if c != nil {
+			conn = c
 		}
-		conn = c
 	}
 	var ctx = &context{conn: conn}
 	if h.Shared {
