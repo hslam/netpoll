@@ -6,6 +6,7 @@ package netpoll
 import (
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -183,6 +184,7 @@ func TestTCPServer(t *testing.T) {
 	}()
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
 	if n, err := conn.Write([]byte(msg)); err != nil {
 		t.Error(err)
 	} else if n != len(msg) {
@@ -230,6 +232,7 @@ func TestUNIXServer(t *testing.T) {
 	}()
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
 	if n, err := conn.Write([]byte(msg)); err != nil {
 		t.Error(err)
 	} else if n != len(msg) {
@@ -279,6 +282,7 @@ func TestOtherServer(t *testing.T) {
 	}()
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
 	if n, err := conn.Write([]byte(msg)); err != nil {
 		t.Error(err)
 	} else if n != len(msg) {
@@ -324,6 +328,7 @@ func TestShared(t *testing.T) {
 	}()
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
 	if n, err := conn.Write([]byte(msg)); err != nil {
 		t.Error(err)
 	} else if n != len(msg) {
@@ -369,6 +374,7 @@ func TestNoCopy(t *testing.T) {
 	}()
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
 	if n, err := conn.Write([]byte(msg)); err != nil {
 		t.Error(err)
 	} else if n != len(msg) {
@@ -463,6 +469,7 @@ func TestNoAsync(t *testing.T) {
 	}()
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
 	if n, err := conn.Write([]byte(msg)); err != nil {
 		t.Error(err)
 	} else if n != len(msg) {
@@ -512,6 +519,7 @@ func TestReschedule(t *testing.T) {
 			defer connWG.Done()
 			conn, _ := net.Dial(network, addr)
 			msg := "Hello World"
+			msg = strings.Repeat(msg, 50)
 			when := time.Now().Add(time.Second)
 			for time.Now().Before(when) {
 				if n, err := conn.Write([]byte(msg)); err != nil {
@@ -574,6 +582,7 @@ func TestRescheduleDone(t *testing.T) {
 			defer connWG.Done()
 			conn, _ := net.Dial(network, addr)
 			msg := "Hello World"
+			msg = strings.Repeat(msg, 50)
 			when := time.Now().Add(time.Second)
 			if i > 20 {
 				for j := 0; j < 4; j++ {

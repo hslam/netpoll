@@ -5,6 +5,7 @@ package netpoll
 
 import (
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -77,6 +78,7 @@ func TestNetServer(t *testing.T) {
 	}()
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
 	if n, err := conn.Write([]byte(msg)); err != nil {
 		t.Error(err)
 	} else if n != len(msg) {
