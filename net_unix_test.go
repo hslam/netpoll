@@ -473,6 +473,7 @@ func TestNoAsync(t *testing.T) {
 	} else if string(buf) != msg {
 		t.Error(string(buf))
 	}
+	time.Sleep(time.Millisecond * 500)
 	conn.Close()
 	server.Close()
 	wg.Wait()
@@ -502,7 +503,7 @@ func TestReschedule(t *testing.T) {
 		server.Serve(l)
 	}()
 	connWG := sync.WaitGroup{}
-	for i := 0; i < 32; i++ {
+	for i := 0; i < 20; i++ {
 		connWG.Add(1)
 		go func() {
 			defer connWG.Done()
