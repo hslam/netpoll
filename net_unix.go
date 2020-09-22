@@ -332,7 +332,7 @@ func (s *Server) reschedule() (stop bool) {
 	return false
 }
 
-// Close closes the listener.
+// Close closes the server.
 func (s *Server) Close() error {
 	if !atomic.CompareAndSwapInt32(&s.closed, 0, 1) {
 		return nil
