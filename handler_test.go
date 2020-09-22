@@ -1,6 +1,7 @@
 package netpoll
 
 import (
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -79,6 +80,24 @@ func TestDataHandler(t *testing.T) {
 	}
 	_, err := handler.Upgrade(&conn{})
 	if err != ErrHandlerFunc {
+		t.Error(err)
+	}
+	handler.HandlerFunc = func(req []byte) (res []byte) {
+		return
+	}
+	var fakeErr = errors.New("fake error")
+	handler.SetUpgrade(func(conn net.Conn) (net.Conn, error) {
+		return nil, fakeErr
+	})
+	_, err = handler.Upgrade(&conn{})
+	if err != fakeErr {
+		t.Error(err)
+	}
+	handler.SetUpgrade(func(conn net.Conn) (net.Conn, error) {
+		return conn, nil
+	})
+	_, err = handler.Upgrade(&conn{})
+	if err != nil {
 		t.Error(err)
 	}
 }
