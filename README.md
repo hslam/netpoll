@@ -1,11 +1,17 @@
 # netpoll
+[![GoDoc](https://godoc.org/github.com/hslam/netpoll?status.svg)](https://godoc.org/github.com/hslam/netpoll)
+[![Build Status](https://travis-ci.org/hslam/netpoll.svg?branch=master)](https://travis-ci.org/hslam/netpoll)
+[![codecov](https://codecov.io/gh/hslam/netpoll/branch/master/graph/badge.svg)](https://codecov.io/gh/hslam/netpoll)
+[![Go Report Card](https://goreportcard.com/badge/github.com/hslam/netpoll?v=7e100)](https://goreportcard.com/report/github.com/hslam/netpoll)
+[![LICENSE](https://img.shields.io/github/license/hslam/netpoll.svg?style=flat-square)](https://github.com/hslam/netpoll/blob/master/LICENSE)
+
 Package netpoll implements a network poller based on epoll/kqueue.
 
 ## Features
 
 * Epoll/Kqueue
 * TCP/UNIX
-* Fully compatible with the net.Conn
+* Compatible with the net.Conn
 * Upgrade Connection
 * Non-Blocking I/O
 * Sync/Async Workers
