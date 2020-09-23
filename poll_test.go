@@ -4,7 +4,9 @@
 package netpoll
 
 import (
-	"os"
+	"net"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -29,10 +31,29 @@ func TestPoll(t *testing.T) {
 	} else if n != 0 {
 		t.Error(n)
 	}
-	tmpfile := "tmppollfile"
-	file, _ := os.Create(tmpfile)
-	defer os.Remove(tmpfile)
-	fd := int(file.Fd())
+	network := "tcp"
+	addr := ":9999"
+	l, _ := net.Listen(network, addr)
+	ln, _ := l.(*net.TCPListener)
+	f, _ := ln.File()
+	epfd := int(f.Fd())
+	if err := syscall.SetNonblock(epfd, false); err != nil {
+		panic(err)
+	}
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		conn, _ := net.Dial(network, addr)
+		for {
+			conn.Read(make([]byte, 64))
+			break
+		}
+	}()
+	fd, _, err := syscall.Accept(epfd)
+	if err != nil {
+		t.Error(err)
+	}
 	p.Register(fd)
 	err = p.Write(fd)
 	if err != nil {
@@ -46,4 +67,9 @@ func TestPoll(t *testing.T) {
 	} else if events[0].Mode != WRITE {
 		t.Error(events)
 	}
+	p.Unregister(fd)
+	syscall.Close(fd)
+	f.Close()
+	l.Close()
+	wg.Wait()
 }
