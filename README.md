@@ -1,5 +1,5 @@
 # netpoll
-Package netpoll implements a network poller base on epoll/kqueue.
+Package netpoll implements a network poller based on epoll/kqueue.
 
 ## Features
 
