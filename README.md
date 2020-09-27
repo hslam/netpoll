@@ -17,6 +17,27 @@ Package netpoll implements a network poller based on epoll/kqueue.
 * Sync/Async Workers
 * Rescheduling Workers
 
+Comparison to other packages.
+|Package| [net](https://github.com/golang/go/tree/master/src/net "net")| [netpoll](https://github.com/hslam/netpoll "netpoll")|[gnet](https://github.com/panjf2000/gnet "gnet")|[evio](https://github.com/tidwall/evio "evio")|
+|:--:|:--|:--|:--|:--|
+|Sync Handler|Yes|Yes|Yes|Yes|
+|Async Handler|Yes|Yes|Yes|No|
+|Low Memory Usage|No|Yes|Yes|Yes|
+|Non-Blocking I/O|No|Yes|Yes|Yes|
+|Rescheduling|Yes|Yes|No|No|
+|Compatible With The net.Conn|Yes|Yes|No|No|
+
+## [Benchmarks](http://github.com/hslam/netpoll-benchmark "netpoll-benchmark")
+
+##### Network QPS
+
+<img src="https://raw.githubusercontent.com/hslam/netpoll/master/netpoll-qps.png"  alt="mock 0ms" align=center>
+
+##### Mocking 1ms QPS
+
+<img src="https://raw.githubusercontent.com/hslam/netpoll/master/netpoll-mock-time-qps.png" alt="mock 1ms" align=center>
+
+
 ## Get started
 
 ### Install
