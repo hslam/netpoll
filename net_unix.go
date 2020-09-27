@@ -349,7 +349,9 @@ func (s *Server) Close() error {
 	if err := s.file.Close(); err != nil {
 		return err
 	}
-	close(s.done)
+	if s.done != nil {
+		close(s.done)
+	}
 	return s.poll.Close()
 }
 
