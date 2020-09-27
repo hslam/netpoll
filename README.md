@@ -28,7 +28,7 @@ Package netpoll implements a network poller based on epoll/kqueue.
 |Rescheduling|Yes|Yes|No|No|
 |Compatible With The net.Conn|Yes|Yes|No|No|
 
-## [Benchmarks](http://github.com/hslam/netpoll-benchmark "netpoll-benchmark")
+## [Benchmark](http://github.com/hslam/netpoll-benchmark "netpoll-benchmark")
 
 ##### Network QPS
 
