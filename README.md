@@ -17,7 +17,8 @@ Package netpoll implements a network poller based on epoll/kqueue.
 * Sync/Async Workers
 * Rescheduling Workers
 
-Comparison to other packages.
+**Comparison to other packages.**
+
 |Package| [net](https://github.com/golang/go/tree/master/src/net "net")| [netpoll](https://github.com/hslam/netpoll "netpoll")|[gnet](https://github.com/panjf2000/gnet "gnet")|[evio](https://github.com/tidwall/evio "evio")|
 |:--:|:--|:--|:--|:--|
 |Sync Handler|Yes|Yes|Yes|Yes|
