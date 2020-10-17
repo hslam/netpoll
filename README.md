@@ -51,7 +51,7 @@ import "github.com/hslam/netpoll"
 ```
 ### Usage
 #### Simple Example
-```
+```go
 package main
 
 import "github.com/hslam/netpoll"
@@ -72,7 +72,7 @@ func main() {
 }
 ```
 #### Websocket Example
-```
+```go
 package main
 
 import (
@@ -97,6 +97,57 @@ func main() {
 	if err := netpoll.ListenAndServe("tcp", ":9999", handler); err != nil {
 		panic(err)
 	}
+}
+```
+
+
+#### HTTP Example
+```go
+package main
+
+import (
+	"bufio"
+	"github.com/hslam/mux"
+	"github.com/hslam/netpoll"
+	"github.com/hslam/response"
+	"net"
+	"net/http"
+	"sync"
+)
+
+func main() {
+	m := mux.New()
+	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Hello World!\r\n"))
+	})
+	ListenAndServe(":8080", m)
+}
+
+func ListenAndServe(addr string, handler http.Handler) error {
+	var h = &netpoll.ConnHandler{}
+	type Context struct {
+		reader  *bufio.Reader
+		conn    net.Conn
+		reading sync.Mutex
+	}
+	h.SetUpgrade(func(conn net.Conn) (netpoll.Context, error) {
+		return &Context{reader: bufio.NewReader(conn), conn: conn}, nil
+	})
+	h.SetServe(func(context netpoll.Context) error {
+		ctx := context.(*Context)
+		ctx.reading.Lock()
+		req, err := http.ReadRequest(ctx.reader)
+		ctx.reading.Unlock()
+		if err != nil {
+			return err
+		}
+		res := response.NewResponse(ctx.conn)
+		handler.ServeHTTP(res, req)
+		err = res.Flush()
+		response.FreeResponse(res)
+		return err
+	})
+	return netpoll.ListenAndServe("tcp", addr, h)
 }
 ```
 
