@@ -127,11 +127,14 @@ func ListenAndServe(addr string, handler http.Handler) error {
 	var h = &netpoll.ConnHandler{}
 	type Context struct {
 		reader  *bufio.Reader
+		rw      *bufio.ReadWriter
 		conn    net.Conn
 		reading sync.Mutex
 	}
 	h.SetUpgrade(func(conn net.Conn) (netpoll.Context, error) {
-		return &Context{reader: bufio.NewReader(conn), conn: conn}, nil
+		reader := bufio.NewReader(conn)
+		rw := bufio.NewReadWriter(reader, bufio.NewWriter(conn))
+		return &Context{reader: bufio.NewReader(conn), conn: conn, rw: rw}, nil
 	})
 	h.SetServe(func(context netpoll.Context) error {
 		ctx := context.(*Context)
@@ -141,7 +144,7 @@ func ListenAndServe(addr string, handler http.Handler) error {
 		if err != nil {
 			return err
 		}
-		res := response.NewResponse(ctx.conn)
+		res := response.NewResponse(ctx.conn, ctx.rw)
 		handler.ServeHTTP(res, req)
 		err = res.Flush()
 		response.FreeResponse(res)
