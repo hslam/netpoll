@@ -30,14 +30,7 @@ Package netpoll implements a network poller based on epoll/kqueue.
 
 ## [Benchmark](http://github.com/hslam/netpoll-benchmark "netpoll-benchmark")
 
-##### Network QPS
-
-<img src="https://raw.githubusercontent.com/hslam/netpoll/master/netpoll-qps.png"  alt="mock 0ms" align=center>
-
-##### Mocking 1ms QPS
-
-<img src="https://raw.githubusercontent.com/hslam/netpoll/master/netpoll-mock-time-qps.png" alt="mock 1ms" align=center>
-
+<img src="https://raw.githubusercontent.com/hslam/netpoll/master/netpoll-qps.png" width = "400" height = "300" alt="mock 0ms" align=center> <img src="https://raw.githubusercontent.com/hslam/netpoll/master/netpoll-mock-time-qps.png" width = "400" height = "300" alt="mock 1ms" align=center>
 
 ## Get started
 
