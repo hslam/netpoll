@@ -127,7 +127,7 @@ func ListenAndServe(addr string, handler http.Handler) error {
 	h.SetUpgrade(func(conn net.Conn) (netpoll.Context, error) {
 		reader := bufio.NewReader(conn)
 		rw := bufio.NewReadWriter(reader, bufio.NewWriter(conn))
-		return &Context{reader: bufio.NewReader(conn), conn: conn, rw: rw}, nil
+		return &Context{reader: reader, conn: conn, rw: rw}, nil
 	})
 	h.SetServe(func(context netpoll.Context) error {
 		ctx := context.(*Context)
