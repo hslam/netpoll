@@ -137,11 +137,11 @@ func ListenAndServe(addr string, handler http.Handler) error {
 		if err != nil {
 			return err
 		}
-		res := response.NewResponse(ctx.conn, ctx.rw)
+		res := response.NewResponse(req, ctx.conn, ctx.rw)
 		handler.ServeHTTP(res, req)
-		err = res.Flush()
+		res.FinishRequest()
 		response.FreeResponse(res)
-		return err
+		return nil
 	})
 	return netpoll.ListenAndServe("tcp", addr, h)
 }
