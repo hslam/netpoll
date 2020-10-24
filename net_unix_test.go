@@ -111,6 +111,37 @@ func TestServerClose(t *testing.T) {
 	wg.Wait()
 }
 
+func TestServerNumCPU(t *testing.T) {
+	var handler = &DataHandler{
+		Shared:     false,
+		NoCopy:     false,
+		BufferSize: 1024,
+		HandlerFunc: func(req []byte) (res []byte) {
+			res = req
+			return
+		},
+	}
+	temp := numCPU
+	numCPU = 17
+	server := &Server{
+		Handler: handler,
+		NoAsync: false,
+	}
+	network := "tcp"
+	addr := ":9999"
+	l, _ := net.Listen(network, addr)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		server.Serve(l)
+	}()
+	time.Sleep(time.Millisecond * 10)
+	server.Close()
+	wg.Wait()
+	numCPU = temp
+}
+
 func TestServerTCPListener(t *testing.T) {
 	var handler = &DataHandler{
 		Shared:     false,
@@ -629,4 +660,30 @@ func TestRescheduleDone(t *testing.T) {
 	server.wakeReschedule()
 	go server.wakeReschedule()
 	wg.Wait()
+}
+
+func TestTopK(t *testing.T) {
+	{
+		l := list{&conn{score: 10}, &conn{score: 7}, &conn{score: 2}, &conn{score: 5}, &conn{score: 1}}
+		k := 3
+		topK(l, k)
+		for j := k; j < l.Len(); j++ {
+			for i := 0; i < k; i++ {
+				if l.Less(i, j) {
+					t.Error("top error")
+				}
+			}
+		}
+	}
+	{
+		l := list{&conn{score: 10}, &conn{score: 7}, &conn{score: 2}, &conn{score: 5}, &conn{score: 1}}
+		k := 9
+		topK(l, k)
+		n := l.Len()
+		for i := 1; i < n; i++ {
+			if l.Less(i, 0) {
+				t.Error("heap error")
+			}
+		}
+	}
 }

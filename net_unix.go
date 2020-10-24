@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"runtime"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -280,11 +279,11 @@ func (s *Server) reschedule() (stop bool) {
 	if len(s.list) == 0 || sum == 0 {
 		return true
 	}
-	sort.Sort(s.list)
 	syncWorkers := s.syncWorkers
 	if uint(len(s.list)) < s.syncWorkers {
 		syncWorkers = uint(len(s.list))
 	}
+	topK(s.list, int(syncWorkers))
 	index := 0
 	for _, conn := range s.list[:syncWorkers] {
 		conn.lock.Lock()
@@ -635,19 +634,46 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 
 type list []*conn
 
-func (l list) Len() int {
-	return len(l)
-}
-
+func (l list) Len() int { return len(l) }
 func (l list) Less(i, j int) bool {
-	if atomic.LoadInt64(&l[i].score) > atomic.LoadInt64(&l[j].score) {
-		return true
+	return atomic.LoadInt64(&l[i].score) < atomic.LoadInt64(&l[j].score)
+}
+func (l list) Swap(i, j int) { l[i], l[j] = l[j], l[i] }
+
+func topK(h list, k int) {
+	n := h.Len()
+	if k > n {
+		k = n
 	}
-	return false
+	for i := k/2 - 1; i >= 0; i-- {
+		heapDown(h, i, k)
+	}
+	if k < n {
+		for i := k; i < n; i++ {
+			if h.Less(0, i) {
+				h.Swap(0, i)
+				heapDown(h, 0, k)
+			}
+		}
+	}
 }
 
-func (l list) Swap(i, j int) {
-	var temp = l[i]
-	l[i] = l[j]
-	l[j] = temp
+func heapDown(h list, i, n int) bool {
+	parent := i
+	for {
+		leftChild := 2*parent + 1
+		if leftChild >= n || leftChild < 0 { // leftChild < 0 after int overflow
+			break
+		}
+		lessChild := leftChild
+		if rightChild := leftChild + 1; rightChild < n && h.Less(rightChild, leftChild) {
+			lessChild = rightChild
+		}
+		if !h.Less(lessChild, parent) {
+			break
+		}
+		h.Swap(parent, lessChild)
+		parent = lessChild
+	}
+	return parent > i
 }
