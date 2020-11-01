@@ -132,10 +132,8 @@ func (h *DataHandler) Upgrade(conn net.Conn) (Context, error) {
 		c, err := h.upgrade(conn)
 		if err != nil {
 			return nil, err
-		} else if c != nil {
-			if c != conn {
-				upgrade = true
-			}
+		} else if c != nil && c != conn {
+			upgrade = true
 			conn = c
 		}
 	}
