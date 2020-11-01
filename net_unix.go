@@ -508,6 +508,7 @@ func (w *worker) register(c *conn) error {
 			return
 		}
 		atomic.StoreInt32(&c.ready, 1)
+		w.serveConn(c)
 	}(w, c)
 	return nil
 }
