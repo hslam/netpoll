@@ -198,6 +198,11 @@ func TestTCPServer(t *testing.T) {
 			return
 		},
 	}
+	handler.SetUpgrade(func(c net.Conn) (net.Conn, error) {
+		var u = &conn{}
+		*u = *(c.(*conn))
+		return u, nil
+	})
 	server := &Server{
 		Handler: handler,
 		NoAsync: false,
