@@ -106,9 +106,12 @@ type DataHandler struct {
 }
 
 type context struct {
-	conn   net.Conn
-	pool   *sync.Pool
-	buffer []byte
+	reading sync.Mutex
+	writing sync.Mutex
+	upgrade bool
+	conn    net.Conn
+	pool    *sync.Pool
+	buffer  []byte
 }
 
 // SetUpgrade sets the Upgrade function for upgrading the net.Conn.
@@ -124,15 +127,17 @@ func (h *DataHandler) Upgrade(conn net.Conn) (Context, error) {
 	if h.HandlerFunc == nil {
 		return nil, ErrHandlerFunc
 	}
+	var upgrade bool
 	if h.upgrade != nil {
 		c, err := h.upgrade(conn)
 		if err != nil {
 			return nil, err
 		} else if c != nil {
+			upgrade = true
 			conn = c
 		}
 	}
-	var ctx = &context{conn: conn}
+	var ctx = &context{upgrade: upgrade, conn: conn}
 	if h.Shared {
 		ctx.pool = assignPool(h.BufferSize)
 	} else {
@@ -155,7 +160,13 @@ func (h *DataHandler) Serve(ctx Context) error {
 	} else {
 		buf = c.buffer
 	}
+	if c.upgrade {
+		c.reading.Lock()
+	}
 	n, err = conn.Read(buf)
+	if c.upgrade {
+		c.reading.Unlock()
+	}
 	if err != nil {
 		return err
 	}
@@ -165,6 +176,12 @@ func (h *DataHandler) Serve(ctx Context) error {
 		copy(req, buf[:n])
 	}
 	res := h.HandlerFunc(req)
+	if c.upgrade {
+		c.writing.Lock()
+	}
 	_, err = conn.Write(res)
+	if c.upgrade {
+		c.writing.Unlock()
+	}
 	return err
 }
