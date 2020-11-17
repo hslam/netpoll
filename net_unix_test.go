@@ -77,8 +77,11 @@ func TestServerPoll(t *testing.T) {
 	}()
 	time.Sleep(time.Millisecond * 10)
 	server.accept()
+	time.Sleep(time.Millisecond * 10)
 	server.Close()
+	time.Sleep(time.Millisecond * 10)
 	server.accept()
+	time.Sleep(time.Millisecond * 10)
 	wg.Wait()
 }
 
@@ -665,6 +668,46 @@ func TestRescheduleDone(t *testing.T) {
 	server.wakeReschedule()
 	go server.wakeReschedule()
 	wg.Wait()
+}
+
+func TestRawConn(t *testing.T) {
+	conn := &conn{fd: 1}
+	rawConn, _ := conn.SyscallConn()
+	rawConn.Control(func(fd uintptr) {
+		if fd != 1 {
+			t.Error(fd)
+		}
+	})
+	rawConn.Read(func(fd uintptr) (done bool) {
+		if fd != 1 {
+			t.Error(fd)
+		}
+		return true
+	})
+	rawConn.Write(func(fd uintptr) (done bool) {
+		if fd != 1 {
+			t.Error(fd)
+		}
+		return true
+	})
+	conn.closed = 1
+	rawConn.Control(func(fd uintptr) {
+		if fd != 1 {
+			t.Error(fd)
+		}
+	})
+	rawConn.Read(func(fd uintptr) (done bool) {
+		if fd != 1 {
+			t.Error(fd)
+		}
+		return true
+	})
+	rawConn.Write(func(fd uintptr) (done bool) {
+		if fd != 1 {
+			t.Error(fd)
+		}
+		return true
+	})
 }
 
 func TestTopK(t *testing.T) {

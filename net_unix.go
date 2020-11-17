@@ -633,6 +633,41 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 	return errors.New("not supported")
 }
 
+func (c *conn) SyscallConn() (syscall.RawConn, error) {
+	return &rawConn{uintptr(c.fd), c}, nil
+}
+
+type rawConn struct {
+	fd uintptr
+	c  *conn
+}
+
+func (c *rawConn) ok() bool { return c != nil && c.fd > 0 && atomic.LoadInt32(&c.c.closed) == 0 }
+
+func (c *rawConn) Control(f func(fd uintptr)) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	f(c.fd)
+	return nil
+}
+
+func (c *rawConn) Read(f func(fd uintptr) (done bool)) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	f(c.fd)
+	return nil
+}
+
+func (c *rawConn) Write(f func(fd uintptr) (done bool)) error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+	f(c.fd)
+	return nil
+}
+
 type list []*conn
 
 func (l list) Len() int { return len(l) }
