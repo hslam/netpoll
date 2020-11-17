@@ -612,7 +612,7 @@ func TestRescheduleDone(t *testing.T) {
 		server.Serve(l)
 	}()
 	connWG := sync.WaitGroup{}
-	for i := 0; i < 128; i++ {
+	for i := 0; i < 32; i++ {
 		connWG.Add(1)
 		go func() {
 			defer connWG.Done()
