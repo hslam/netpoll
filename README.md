@@ -122,7 +122,7 @@ func ListenAndServe(addr string, handler http.Handler) error {
 		reader  *bufio.Reader
 		rw      *bufio.ReadWriter
 		conn    net.Conn
-		reading sync.Mutex
+		serving sync.Mutex
 	}
 	h.SetUpgrade(func(conn net.Conn) (netpoll.Context, error) {
 		reader := bufio.NewReader(conn)
@@ -131,15 +131,16 @@ func ListenAndServe(addr string, handler http.Handler) error {
 	})
 	h.SetServe(func(context netpoll.Context) error {
 		ctx := context.(*Context)
-		ctx.reading.Lock()
+		ctx.serving.Lock()
 		req, err := http.ReadRequest(ctx.reader)
-		ctx.reading.Unlock()
 		if err != nil {
+			ctx.serving.Unlock()
 			return err
 		}
 		res := response.NewResponse(req, ctx.conn, ctx.rw)
 		handler.ServeHTTP(res, req)
 		res.FinishRequest()
+		ctx.serving.Unlock()
 		response.FreeResponse(res)
 		return nil
 	})
