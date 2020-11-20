@@ -111,7 +111,7 @@ import (
 func main() {
 	m := mux.New()
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello World!\r\n"))
+		w.Write([]byte("Hello World"))
 	})
 	ListenAndServe(":8080", m)
 }
