@@ -419,8 +419,10 @@ func (w *worker) run(wg *sync.WaitGroup) {
 		for i := range w.events[:n] {
 			ev := w.events[i]
 			if w.async {
+				wg.Add(1)
 				job := func() {
 					w.serve(ev)
+					wg.Done()
 				}
 				select {
 				case w.jobs <- job:
