@@ -63,7 +63,7 @@ func main() {
 	}
 }
 ```
-#### Websocket Example
+#### [Websocket](http://github.com/hslam/websocket "websocket") Example
 ```go
 package main
 
@@ -93,7 +93,7 @@ func main() {
 ```
 
 
-#### HTTP Example
+#### [HTTP](http://github.com/hslam/rum "rum") Example
 ```go
 package main
 
