@@ -139,8 +139,8 @@ func (s *Server) Serve(l net.Listener) (err error) {
 			if events[0].Fd == s.fd {
 				err = s.accept()
 			}
-			runtime.Gosched()
 		}
+		runtime.Gosched()
 	}
 	s.wg.Wait()
 	return nil
@@ -239,6 +239,7 @@ func (s *Server) wakeReschedule() {
 					ticker.Stop()
 					return
 				}
+				runtime.Gosched()
 			}
 		}()
 	} else {
@@ -486,6 +487,7 @@ func (w *worker) serveConn(c *conn) error {
 			c.Close()
 			return nil
 		}
+		runtime.Gosched()
 	}
 }
 
