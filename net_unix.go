@@ -494,21 +494,20 @@ func (w *worker) serveConn(c *conn) error {
 func (w *worker) register(c *conn) error {
 	w.Increase(c)
 	go func(w *worker, c *conn) {
+		var err error
 		defer func() {
-			if e := recover(); e != nil {
+			if err != nil {
+				w.Decrease(c)
+				c.Close()
 			}
 		}()
-		if err := syscall.SetNonblock(c.fd, false); err != nil {
+		if err = syscall.SetNonblock(c.fd, false); err != nil {
 			return
 		}
-		ctx, err := w.server.Handler.Upgrade(c)
-		if err != nil {
-			w.Decrease(c)
-			c.Close()
+		if c.context, err = w.server.Handler.Upgrade(c); err != nil {
 			return
 		}
-		c.context = ctx
-		if err := syscall.SetNonblock(c.fd, true); err != nil {
+		if err = syscall.SetNonblock(c.fd, true); err != nil {
 			return
 		}
 		atomic.StoreInt32(&c.ready, 1)

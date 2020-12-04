@@ -66,10 +66,6 @@ func (s *netServer) Serve(l net.Listener) (err error) {
 			break
 		}
 		go func(c net.Conn) {
-			defer func() {
-				if e := recover(); e != nil {
-				}
-			}()
 			var err error
 			var context Context
 			if context, err = s.Handler.Upgrade(c); err != nil {
