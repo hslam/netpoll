@@ -312,6 +312,9 @@ func (s *Server) reschedule() (stop bool) {
 		return false
 	}
 	for i := 0; i < len(reschedules); i++ {
+		if atomic.LoadInt32(&s.adjust[i].ready) == 0 || atomic.LoadInt32(&reschedules[i].ready) == 0 {
+			continue
+		}
 		s.adjust[i].lock.Lock()
 		reschedules[i].lock.Lock()
 		syncWorker := s.adjust[i].w
