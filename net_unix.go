@@ -26,7 +26,7 @@ type Server struct {
 	Handler Handler
 	// NoAsync disables async workers.
 	NoAsync      bool
-	listener     net.Listener
+	addr         net.Addr
 	netServer    *netServer
 	file         *os.File
 	fd           int
@@ -72,21 +72,20 @@ func (s *Server) Serve(l net.Listener) (err error) {
 	if atomic.LoadInt32(&s.closed) != 0 {
 		return ErrServerClosed
 	}
-	s.listener = l
-	if s.listener == nil {
+	if l == nil {
 		return ErrListener
 	} else if s.Handler == nil {
 		return ErrHandler
 	}
-	switch netListener := s.listener.(type) {
+	switch netListener := l.(type) {
 	case *net.TCPListener:
 		if s.file, err = netListener.File(); err != nil {
-			s.listener.Close()
+			l.Close()
 			return err
 		}
 	case *net.UnixListener:
 		if s.file, err = netListener.File(); err != nil {
-			s.listener.Close()
+			l.Close()
 			return err
 		}
 	default:
@@ -94,8 +93,9 @@ func (s *Server) Serve(l net.Listener) (err error) {
 		return s.netServer.Serve(l)
 	}
 	s.fd = int(s.file.Fd())
+	s.addr = l.Addr()
+	l.Close()
 	if err := syscall.SetNonblock(s.fd, true); err != nil {
-		s.listener.Close()
 		return err
 	}
 	s.syncWorkers = 16
@@ -179,7 +179,7 @@ func (s *Server) accept() (err error) {
 	}
 	w := s.assignWorker()
 	w.Wake(&s.wg)
-	return w.register(&conn{w: w, fd: nfd, raddr: raddr, laddr: s.listener.Addr()})
+	return w.register(&conn{w: w, fd: nfd, raddr: raddr, laddr: s.addr})
 }
 
 func (s *Server) assignWorker() (w *worker) {
@@ -345,9 +345,6 @@ func (s *Server) Close() error {
 	}
 	for i := 0; i < len(s.workers); i++ {
 		s.workers[i].Close()
-	}
-	if err := s.listener.Close(); err != nil {
-		return err
 	}
 	if err := s.file.Close(); err != nil {
 		return err
