@@ -24,24 +24,27 @@ type Server struct {
 	Address string
 	// Handler responds to a single request.
 	Handler Handler
-	// NoAsync disables async workers.
-	NoAsync      bool
-	addr         net.Addr
-	netServer    *netServer
-	file         *os.File
-	fd           int
-	poll         *Poll
-	workers      []*worker
-	rescheduled  bool
-	lock         sync.Mutex
-	wake         bool
-	rescheduling int32
-	list         list
-	adjust       list
-	syncWorkers  uint
-	wg           sync.WaitGroup
-	closed       int32
-	done         chan struct{}
+	// NoAsync disables async.
+	NoAsync         bool
+	UnsharedWorkers int
+	SharedWorkers   int
+	addr            net.Addr
+	netServer       *netServer
+	file            *os.File
+	fd              int
+	poll            *Poll
+	workers         []*worker
+	rescheduled     bool
+	lock            sync.Mutex
+	wake            bool
+	rescheduling    int32
+	list            list
+	adjust          list
+	unsharedWorkers uint
+	sharedWorkers   uint
+	wg              sync.WaitGroup
+	closed          int32
+	done            chan struct{}
 }
 
 // ListenAndServe listens on the network address and then calls
@@ -72,6 +75,18 @@ func (s *Server) Serve(l net.Listener) (err error) {
 	if atomic.LoadInt32(&s.closed) != 0 {
 		return ErrServerClosed
 	}
+	if s.UnsharedWorkers == 0 {
+		s.unsharedWorkers = 16
+	} else if s.UnsharedWorkers > 0 {
+		s.unsharedWorkers = uint(s.UnsharedWorkers)
+	}
+	if s.SharedWorkers == 0 {
+		s.sharedWorkers = uint(numCPU)
+	} else if s.SharedWorkers > 0 {
+		s.sharedWorkers = uint(s.SharedWorkers)
+	} else {
+		panic("SharedWorkers < 0")
+	}
 	if l == nil {
 		return ErrListener
 	} else if s.Handler == nil {
@@ -98,24 +113,20 @@ func (s *Server) Serve(l net.Listener) (err error) {
 	if err := syscall.SetNonblock(s.fd, true); err != nil {
 		return err
 	}
-	s.syncWorkers = 16
-	if numCPU > 16 {
-		s.syncWorkers = uint(numCPU)
-	}
 	if s.poll, err = Create(); err != nil {
 		return err
 	}
 	s.poll.Register(s.fd)
-	if !s.NoAsync && s.syncWorkers > 0 {
+	if !s.NoAsync && s.unsharedWorkers > 0 {
 		s.rescheduled = true
 	}
-	for i := 0; i < int(s.syncWorkers)+numCPU; i++ {
+	for i := 0; i < int(s.unsharedWorkers+s.sharedWorkers); i++ {
 		p, err := Create()
 		if err != nil {
 			return err
 		}
 		var async bool
-		if i >= int(s.syncWorkers) && !s.NoAsync {
+		if i >= int(s.unsharedWorkers) && !s.NoAsync {
 			async = true
 		}
 		w := &worker{
@@ -183,15 +194,15 @@ func (s *Server) accept() (err error) {
 }
 
 func (s *Server) assignWorker() (w *worker) {
-	if w := s.idleSyncWorker(); w != nil {
+	if w := s.idleUnsharedWorkers(); w != nil {
 		return w
 	}
-	return s.leastConnectedAsyncWorker()
+	return s.leastConnectedSharedWorkers()
 }
 
-func (s *Server) idleSyncWorker() (w *worker) {
-	if s.syncWorkers > 0 {
-		for i := 0; i < int(s.syncWorkers); i++ {
+func (s *Server) idleUnsharedWorkers() (w *worker) {
+	if s.unsharedWorkers > 0 {
+		for i := 0; i < int(s.unsharedWorkers); i++ {
 			if s.workers[i].count < 1 {
 				return s.workers[i]
 			}
@@ -200,11 +211,11 @@ func (s *Server) idleSyncWorker() (w *worker) {
 	return nil
 }
 
-func (s *Server) leastConnectedAsyncWorker() (w *worker) {
-	min := s.workers[s.syncWorkers].count
-	index := int(s.syncWorkers)
-	if len(s.workers) > int(s.syncWorkers) {
-		for i := int(s.syncWorkers) + 1; i < len(s.workers); i++ {
+func (s *Server) leastConnectedSharedWorkers() (w *worker) {
+	min := s.workers[s.unsharedWorkers].count
+	index := int(s.unsharedWorkers)
+	if len(s.workers) > int(s.unsharedWorkers) {
+		for i := int(s.unsharedWorkers) + 1; i < len(s.workers); i++ {
 			if s.workers[i].count < min {
 				min = s.workers[i].count
 				index = i
@@ -267,7 +278,7 @@ func (s *Server) reschedule() (stop bool) {
 		}
 		w.mu.Lock()
 		for _, conn := range w.conns {
-			if uint(idx) < s.syncWorkers {
+			if uint(idx) < s.unsharedWorkers {
 				s.adjust = append(s.adjust, conn)
 			}
 			conn.score = atomic.LoadInt64(&conn.count)
@@ -280,13 +291,13 @@ func (s *Server) reschedule() (stop bool) {
 	if len(s.list) == 0 || sum == 0 {
 		return true
 	}
-	syncWorkers := s.syncWorkers
-	if uint(len(s.list)) < s.syncWorkers {
-		syncWorkers = uint(len(s.list))
+	unsharedWorkers := s.unsharedWorkers
+	if uint(len(s.list)) < s.unsharedWorkers {
+		unsharedWorkers = uint(len(s.list))
 	}
-	topK(s.list, int(syncWorkers))
+	topK(s.list, int(unsharedWorkers))
 	index := 0
-	for _, conn := range s.list[:syncWorkers] {
+	for _, conn := range s.list[:unsharedWorkers] {
 		conn.lock.Lock()
 		if conn.w.async {
 			conn.lock.Unlock()
@@ -317,18 +328,18 @@ func (s *Server) reschedule() (stop bool) {
 		}
 		s.adjust[i].lock.Lock()
 		reschedules[i].lock.Lock()
-		syncWorker := s.adjust[i].w
-		asyncWorker := reschedules[i].w
-		syncWorker.mu.Lock()
-		asyncWorker.mu.Lock()
-		syncWorker.decrease(s.adjust[i])
-		s.adjust[i].w = asyncWorker
-		asyncWorker.increase(s.adjust[i])
-		asyncWorker.decrease(reschedules[i])
-		reschedules[i].w = syncWorker
-		syncWorker.increase(reschedules[i])
-		asyncWorker.mu.Unlock()
-		syncWorker.mu.Unlock()
+		unsharedWorker := s.adjust[i].w
+		sharedWorker := reschedules[i].w
+		unsharedWorker.mu.Lock()
+		sharedWorker.mu.Lock()
+		unsharedWorker.decrease(s.adjust[i])
+		s.adjust[i].w = sharedWorker
+		sharedWorker.increase(s.adjust[i])
+		sharedWorker.decrease(reschedules[i])
+		reschedules[i].w = unsharedWorker
+		unsharedWorker.increase(reschedules[i])
+		sharedWorker.mu.Unlock()
+		unsharedWorker.mu.Unlock()
 		s.adjust[i].lock.Unlock()
 		reschedules[i].lock.Unlock()
 	}

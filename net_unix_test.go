@@ -528,6 +528,82 @@ func TestNoAsync(t *testing.T) {
 	wg.Wait()
 }
 
+func TestSharedWorkers(t *testing.T) {
+	var handler = &DataHandler{
+		Shared:     false,
+		NoCopy:     true,
+		BufferSize: 1024,
+		HandlerFunc: func(req []byte) (res []byte) {
+			res = req
+			return
+		},
+	}
+	server := &Server{
+		Handler:         handler,
+		NoAsync:         true,
+		UnsharedWorkers: 16,
+		SharedWorkers:   numCPU,
+	}
+	network := "tcp"
+	addr := ":9999"
+	l, _ := net.Listen(network, addr)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := server.Serve(l); err != nil {
+			t.Error(err)
+		}
+	}()
+	conn, _ := net.Dial(network, addr)
+	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
+	if n, err := conn.Write([]byte(msg)); err != nil {
+		t.Error(err)
+	} else if n != len(msg) {
+		t.Error(n)
+	}
+	buf := make([]byte, len(msg))
+	if n, err := conn.Read(buf); err != nil {
+		t.Error(err)
+	} else if n != len(msg) {
+		t.Error(n)
+	} else if string(buf) != msg {
+		t.Error(string(buf))
+	}
+	time.Sleep(time.Millisecond * 500)
+	conn.Close()
+	server.Close()
+	wg.Wait()
+}
+
+func TestSharedWorkersPanic(t *testing.T) {
+	var handler = &DataHandler{
+		Shared:     false,
+		NoCopy:     true,
+		BufferSize: 1024,
+		HandlerFunc: func(req []byte) (res []byte) {
+			res = req
+			return
+		},
+	}
+	server := &Server{
+		Handler:         handler,
+		NoAsync:         true,
+		UnsharedWorkers: 16,
+		SharedWorkers:   -1,
+	}
+	defer func() {
+		if p := recover(); p == nil {
+			t.Error()
+		}
+	}()
+	if err := server.Serve(nil); err != nil {
+		t.Error(err)
+	}
+
+}
+
 func TestReschedule(t *testing.T) {
 	var handler = &DataHandler{
 		Shared:     false,
