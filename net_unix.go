@@ -412,38 +412,42 @@ func (w *worker) Sleep() {
 }
 
 func (w *worker) run(wg *sync.WaitGroup) {
-	defer wg.Done()
+	defer func() {
+		w.lock.Lock()
+		w.Sleep()
+		w.running = false
+		w.lock.Unlock()
+		wg.Done()
+	}()
 	var n int
 	var err error
 	for err == nil {
 		n, err = w.poll.Wait(w.events)
-		for i := range w.events[:n] {
-			ev := w.events[i]
-			if w.async {
-				wg.Add(1)
-				job := func() {
+		if n > 0 {
+			for i := range w.events[:n] {
+				ev := w.events[i]
+				if w.async {
+					wg.Add(1)
+					job := func() {
+						w.serve(ev)
+						wg.Done()
+					}
+					select {
+					case w.jobs <- job:
+					case w.tasks <- struct{}{}:
+						go w.task(job)
+					default:
+						go job()
+					}
+				} else {
 					w.serve(ev)
-					wg.Done()
 				}
-				select {
-				case w.jobs <- job:
-				case w.tasks <- struct{}{}:
-					go w.task(job)
-				default:
-					go job()
-				}
-			} else {
-				w.serve(ev)
 			}
 		}
 		if n > 0 && w.async {
 			w.server.wakeReschedule()
 		}
 		if atomic.LoadInt64(&w.count) < 1 {
-			w.lock.Lock()
-			w.Sleep()
-			w.running = false
-			w.lock.Unlock()
 			return
 		}
 		runtime.Gosched()
