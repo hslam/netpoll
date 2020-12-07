@@ -28,6 +28,7 @@ type Server struct {
 	NoAsync         bool
 	UnsharedWorkers int
 	SharedWorkers   int
+	TasksPerWorker  int
 	addr            net.Addr
 	netServer       *netServer
 	file            *os.File
@@ -42,6 +43,7 @@ type Server struct {
 	adjust          list
 	unsharedWorkers uint
 	sharedWorkers   uint
+	tasksPerWorker  uint
 	wg              sync.WaitGroup
 	closed          int32
 	done            chan struct{}
@@ -86,6 +88,11 @@ func (s *Server) Serve(l net.Listener) (err error) {
 		s.sharedWorkers = uint(s.SharedWorkers)
 	} else {
 		panic("SharedWorkers < 0")
+	}
+	if s.TasksPerWorker == 0 {
+		s.tasksPerWorker = uint(numCPU)
+	} else if s.TasksPerWorker > 0 {
+		s.tasksPerWorker = uint(s.TasksPerWorker)
 	}
 	if l == nil {
 		return ErrListener
@@ -138,7 +145,7 @@ func (s *Server) Serve(l net.Listener) (err error) {
 			async:  async,
 			done:   make(chan struct{}, 1),
 			jobs:   make(chan func()),
-			tasks:  make(chan struct{}, numCPU),
+			tasks:  make(chan struct{}, s.tasksPerWorker),
 		}
 		s.workers = append(s.workers, w)
 	}

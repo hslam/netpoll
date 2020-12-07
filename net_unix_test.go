@@ -543,6 +543,7 @@ func TestSharedWorkers(t *testing.T) {
 		NoAsync:         true,
 		UnsharedWorkers: 16,
 		SharedWorkers:   numCPU,
+		TasksPerWorker:  numCPU,
 	}
 	network := "tcp"
 	addr := ":9999"
