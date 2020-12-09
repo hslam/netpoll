@@ -18,9 +18,15 @@ type Server struct {
 	// Handler responds to a single request.
 	Handler Handler
 	// NoAsync do not work for consisted with other system.
-	NoAsync   bool
-	netServer *netServer
-	closed    int32
+	NoAsync bool
+	// UnsharedWorkers do not work for consisted with other system.
+	UnsharedWorkers int
+	// SharedWorkers do not work for consisted with other system.
+	SharedWorkers int
+	// TasksPerWorker do not work for consisted with other system.
+	TasksPerWorker int
+	netServer      *netServer
+	closed         int32
 }
 
 // ListenAndServe listens on the network address and then calls
