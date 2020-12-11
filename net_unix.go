@@ -7,6 +7,8 @@ package netpoll
 
 import (
 	"errors"
+	"github.com/hslam/splice"
+	"io"
 	"net"
 	"os"
 	"runtime"
@@ -591,6 +593,7 @@ type conn struct {
 	closed  int32
 }
 
+// Read reads data from the connection.
 func (c *conn) Read(b []byte) (n int, err error) {
 	if len(b) == 0 {
 		return 0, nil
@@ -614,6 +617,7 @@ func (c *conn) Read(b []byte) (n int, err error) {
 	return
 }
 
+// Write writes data to the connection.
 func (c *conn) Write(b []byte) (n int, err error) {
 	if len(b) == 0 {
 		return 0, nil
@@ -631,6 +635,7 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	return len(b), nil
 }
 
+// Close closes the connection.
 func (c *conn) Close() (err error) {
 	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
 		return
@@ -638,10 +643,12 @@ func (c *conn) Close() (err error) {
 	return syscall.Close(c.fd)
 }
 
+// LocalAddr returns the local network address.
 func (c *conn) LocalAddr() net.Addr {
 	return c.laddr
 }
 
+// RemoteAddr returns the remote network address.
 func (c *conn) RemoteAddr() net.Addr {
 	return c.raddr
 }
@@ -658,8 +665,72 @@ func (c *conn) SetWriteDeadline(t time.Time) error {
 	return errors.New("not supported")
 }
 
+func (c *conn) ok() bool { return c != nil && c.fd > 0 && atomic.LoadInt32(&c.closed) == 0 }
+
+// SyscallConn returns a raw network connection.
+// This implements the syscall.Conn interface.
 func (c *conn) SyscallConn() (syscall.RawConn, error) {
 	return &rawConn{uintptr(c.fd), c}, nil
+}
+
+// ReadFrom implements the io.ReaderFrom ReadFrom method.
+func (c *conn) ReadFrom(r io.Reader) (int64, error) {
+	var remain int64
+	if lr, ok := r.(*io.LimitedReader); ok {
+		remain, r = lr.N, lr.R
+		if remain <= 0 {
+			return 0, nil
+		}
+	}
+	if _, ok := r.(syscall.Conn); ok {
+		if src, ok := r.(net.Conn); ok {
+			if remain <= 0 {
+				remain = bufferSize
+			}
+			var n int64
+			var err error
+			n, err = splice.Splice(c, src, remain)
+			if err != splice.ErrNotHandled {
+				return n, err
+			}
+		}
+	}
+	return genericReadFrom(c, r, remain)
+}
+
+func genericReadFrom(w io.Writer, r io.Reader, remain int64) (n int64, err error) {
+	if remain < 0 {
+		return
+	}
+	if remain == 0 {
+		remain = bufferSize
+	} else if remain > bufferSize {
+		remain = bufferSize
+	}
+	pool := assignPool(int(remain))
+	buf := pool.Get().([]byte)
+	defer pool.Put(buf)
+	var retain int
+	retain, err = r.Read(buf)
+	if err != nil {
+		return 0, err
+	}
+	var out int
+	var pos int
+	for retain > 0 {
+		out, err = w.Write(buf[pos : pos+retain])
+		if out > 0 {
+			retain -= out
+			n += int64(out)
+			pos += out
+			continue
+		}
+		if err != syscall.EAGAIN {
+			return n, err
+		}
+		time.Sleep(time.Microsecond * 10)
+	}
+	return n, nil
 }
 
 type rawConn struct {
@@ -667,10 +738,8 @@ type rawConn struct {
 	c  *conn
 }
 
-func (c *rawConn) ok() bool { return c != nil && c.fd > 0 && atomic.LoadInt32(&c.c.closed) == 0 }
-
 func (c *rawConn) Control(f func(fd uintptr)) error {
-	if !c.ok() {
+	if !c.c.ok() {
 		return syscall.EINVAL
 	}
 	f(c.fd)
@@ -678,7 +747,7 @@ func (c *rawConn) Control(f func(fd uintptr)) error {
 }
 
 func (c *rawConn) Read(f func(fd uintptr) (done bool)) error {
-	if !c.ok() {
+	if !c.c.ok() {
 		return syscall.EINVAL
 	}
 	f(c.fd)
@@ -686,7 +755,7 @@ func (c *rawConn) Read(f func(fd uintptr) (done bool)) error {
 }
 
 func (c *rawConn) Write(f func(fd uintptr) (done bool)) error {
-	if !c.ok() {
+	if !c.c.ok() {
 		return syscall.EINVAL
 	}
 	f(c.fd)

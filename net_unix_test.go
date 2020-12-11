@@ -4,6 +4,7 @@
 package netpoll
 
 import (
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -785,6 +786,196 @@ func TestRawConn(t *testing.T) {
 		}
 		return true
 	})
+}
+
+func TestSplice(t *testing.T) {
+	var handler = &ConnHandler{}
+	handler.SetUpgrade(func(conn net.Conn) (Context, error) {
+		return conn, nil
+	})
+	handler.SetServe(func(context Context) error {
+		conn := context.(net.Conn)
+		_, err := io.Copy(conn, conn)
+		return err
+	})
+	server := &Server{
+		Handler: handler,
+		NoAsync: false,
+	}
+	network := "tcp"
+	addr := ":9999"
+	l, _ := net.Listen(network, addr)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := server.Serve(l); err != nil {
+			t.Error(err)
+		}
+	}()
+	conn, _ := net.Dial(network, addr)
+	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
+	if n, err := conn.Write([]byte(msg)); err != nil {
+		t.Error(err)
+	} else if n != len(msg) {
+		t.Error(n)
+	}
+	buf := make([]byte, len(msg))
+	if n, err := conn.Read(buf); err != nil {
+		t.Error(err)
+	} else if n != len(msg) {
+		t.Error(n)
+	} else if string(buf) != msg {
+		t.Error(string(buf))
+	}
+	conn.Close()
+	server.Close()
+	wg.Wait()
+}
+
+func TestReadFromLimitedReader(t *testing.T) {
+	var handler = &ConnHandler{}
+	handler.SetUpgrade(func(conn net.Conn) (Context, error) {
+		return conn, nil
+	})
+	handler.SetServe(func(context Context) error {
+		conn := context.(net.Conn)
+		io.CopyN(conn, conn, 0)
+		_, err := io.CopyN(conn, conn, bufferSize)
+		return err
+	})
+	server := &Server{
+		Handler: handler,
+		NoAsync: false,
+	}
+	network := "tcp"
+	addr := ":9999"
+	l, _ := net.Listen(network, addr)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := server.Serve(l); err != nil {
+			t.Error(err)
+		}
+	}()
+	conn, _ := net.Dial(network, addr)
+	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
+	if n, err := conn.Write([]byte(msg)); err != nil {
+		t.Error(err)
+	} else if n != len(msg) {
+		t.Error(n)
+	}
+	buf := make([]byte, len(msg))
+	if n, err := conn.Read(buf); err != nil {
+		t.Error(err)
+	} else if n != len(msg) {
+		t.Error(n)
+	} else if string(buf) != msg {
+		t.Error(string(buf))
+	}
+	conn.Close()
+	server.Close()
+	wg.Wait()
+}
+
+func TestGenericReadFrom(t *testing.T) {
+	var handler = &ConnHandler{}
+	handler.SetUpgrade(func(conn net.Conn) (Context, error) {
+		return conn, nil
+	})
+	handler.SetServe(func(context Context) error {
+		conn := context.(net.Conn)
+		buf := make([]byte, bufferSize)
+		r, w := io.Pipe()
+		n, _ := conn.Read(buf)
+		go w.Write(buf[:n])
+		conn.(io.ReaderFrom).ReadFrom(r)
+		return EAGAIN
+	})
+	server := &Server{
+		Handler: handler,
+		NoAsync: false,
+	}
+	network := "tcp"
+	addr := ":9999"
+	l, _ := net.Listen(network, addr)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := server.Serve(l); err != nil {
+			t.Error(err)
+		}
+	}()
+	conn, _ := net.Dial(network, addr)
+	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
+	if n, err := conn.Write([]byte(msg)); err != nil {
+		t.Error(err)
+	} else if n != len(msg) {
+		t.Error(n)
+	}
+	buf := make([]byte, len(msg))
+	if n, err := conn.Read(buf); err != nil {
+		t.Error(err)
+	} else if n != len(msg) {
+		t.Error(n)
+	} else if string(buf) != msg {
+		t.Error(string(buf))
+	}
+	conn.Close()
+	server.Close()
+	wg.Wait()
+}
+
+func TestGenericReadFromRemain(t *testing.T) {
+	genericReadFrom(nil, nil, -1)
+	var handler = &ConnHandler{}
+	handler.SetUpgrade(func(conn net.Conn) (Context, error) {
+		return conn, nil
+	})
+	handler.SetServe(func(context Context) error {
+		conn := context.(net.Conn)
+		_, err := genericReadFrom(conn, conn, bufferSize+1)
+		return err
+	})
+	server := &Server{
+		Handler: handler,
+		NoAsync: false,
+	}
+	network := "tcp"
+	addr := ":9999"
+	l, _ := net.Listen(network, addr)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := server.Serve(l); err != nil {
+			t.Error(err)
+		}
+	}()
+	conn, _ := net.Dial(network, addr)
+	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
+	if n, err := conn.Write([]byte(msg)); err != nil {
+		t.Error(err)
+	} else if n != len(msg) {
+		t.Error(n)
+	}
+	buf := make([]byte, len(msg))
+	if n, err := conn.Read(buf); err != nil {
+		t.Error(err)
+	} else if n != len(msg) {
+		t.Error(n)
+	} else if string(buf) != msg {
+		t.Error(string(buf))
+	}
+	conn.Close()
+	server.Close()
+	wg.Wait()
 }
 
 func TestTopK(t *testing.T) {
