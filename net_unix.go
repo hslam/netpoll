@@ -609,7 +609,7 @@ func (c *conn) Read(b []byte) (n int, err error) {
 	c.rlock.Lock()
 	defer c.rlock.Unlock()
 	n, err = syscall.Read(c.fd, b)
-	if err != nil && err != syscall.EAGAIN {
+	if err != nil && err != syscall.EAGAIN || err == nil && n == 0 {
 		err = EOF
 	}
 	if n < 0 {
@@ -747,7 +747,7 @@ func genericReadFrom(w io.Writer, r io.Reader, remain int64) (n int64, err error
 			continue
 		}
 		if err != syscall.EAGAIN {
-			return n, err
+			return n, EOF
 		}
 	}
 	return n, nil
