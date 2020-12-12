@@ -847,14 +847,22 @@ func TestSendFile(t *testing.T) {
 	if offset > 0 {
 		srcFile.Write(make([]byte, offset))
 	}
-	srcFile.Write([]byte(contents))
-	srcFile.Sync()
 	var handler = &ConnHandler{}
 	handler.SetUpgrade(func(conn net.Conn) (Context, error) {
 		return conn, nil
 	})
 	handler.SetServe(func(context Context) error {
 		conn := context.(net.Conn)
+		buf := make([]byte, len(contents))
+		if n, err := conn.Read(buf); err != nil {
+			return err
+		} else if n != len(contents) {
+			t.Error(n)
+		} else if string(buf) != contents {
+			t.Error(string(buf))
+		}
+		srcFile.Write([]byte(contents))
+		srcFile.Sync()
 		io.Copy(conn, srcFile)
 		srcFile.Seek(int64(offset), os.SEEK_SET)
 		_, err := io.Copy(conn, srcFile)
@@ -876,6 +884,11 @@ func TestSendFile(t *testing.T) {
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
+	if n, err := conn.Write([]byte(contents)); err != nil {
+		t.Error(err)
+	} else if n != len(contents) {
+		t.Error(n)
+	}
 	buf := make([]byte, len(contents))
 	if n, err := conn.Read(buf); err != nil {
 		t.Error(err)
