@@ -11,10 +11,11 @@ Package netpoll implements a network poller based on epoll/kqueue.
 
 * Epoll/kqueue
 * TCP/UNIX
-* Compatible with the net.Conn interface
+* Compatible with the net.Conn interface.
 * Upgrade connection
 * Non-blocking I/O
 * [Splice](https://github.com/hslam/splice "splice")/[sendfile](https://github.com/hslam/sendfile "sendfile")
+* TLS
 * Sync/async workers
 * Rescheduling workers
 
@@ -27,6 +28,7 @@ Package netpoll implements a network poller based on epoll/kqueue.
 |Low memory usage|No|Yes|Yes|Yes|
 |Non-blocking I/O|No|Yes|Yes|Yes|
 |Splice/sendfile|Yes|Yes|No|No|
+|TLS|Yes|Yes|No|No|
 |Rescheduling|Yes|Yes|No|No|
 |Compatible with the net.Conn interface|Yes|Yes|No|No|
 
@@ -67,6 +69,41 @@ func main() {
 	}
 }
 ```
+
+#### TLS Example
+```go
+package main
+
+import (
+	"crypto/tls"
+	"github.com/hslam/netpoll"
+	"github.com/hslam/socket"
+	"net"
+)
+
+func main() {
+	var handler = &netpoll.DataHandler{
+		Shared:     false,
+		NoCopy:     true,
+		BufferSize: 1024,
+		HandlerFunc: func(req []byte) (res []byte) {
+			res = req
+			return
+		},
+	}
+	handler.SetUpgrade(func(conn net.Conn) (net.Conn, error) {
+		tlsConn := tls.Server(conn, socket.DefalutTLSConfig())
+		if err := tlsConn.Handshake(); err != nil {
+			return nil, err
+		}
+		return tlsConn, nil
+	})
+	if err := netpoll.ListenAndServe("tcp", ":9999", handler); err != nil {
+		panic(err)
+	}
+}
+```
+
 #### [Websocket](http://github.com/hslam/websocket "websocket") Example
 ```go
 package main
