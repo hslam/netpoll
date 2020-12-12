@@ -834,6 +834,61 @@ func TestSplice(t *testing.T) {
 	wg.Wait()
 }
 
+func TestSendFile(t *testing.T) {
+	srcName := "srcfile"
+	srcFile, err := os.Create(srcName)
+	if err != nil {
+		panic(err)
+	}
+	defer os.Remove(srcName)
+	defer srcFile.Close()
+	contents := "Hello world"
+	offset := 10
+	if offset > 0 {
+		srcFile.Write(make([]byte, offset))
+	}
+	srcFile.Write([]byte(contents))
+	srcFile.Sync()
+	var handler = &ConnHandler{}
+	handler.SetUpgrade(func(conn net.Conn) (Context, error) {
+		return conn, nil
+	})
+	handler.SetServe(func(context Context) error {
+		conn := context.(net.Conn)
+		io.Copy(conn, srcFile)
+		srcFile.Seek(int64(offset), os.SEEK_SET)
+		_, err := io.Copy(conn, srcFile)
+		return err
+	})
+	server := &Server{
+		Handler: handler,
+		NoAsync: false,
+	}
+	network := "tcp"
+	addr := ":9999"
+	l, _ := net.Listen(network, addr)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := server.Serve(l); err != nil {
+			t.Error(err)
+		}
+	}()
+	conn, _ := net.Dial(network, addr)
+	buf := make([]byte, len(contents))
+	if n, err := conn.Read(buf); err != nil {
+		t.Error(err)
+	} else if n != len(contents) {
+		t.Error(n)
+	} else if string(buf) != contents {
+		t.Error(string(buf))
+	}
+	conn.Close()
+	server.Close()
+	wg.Wait()
+}
+
 func TestReadFromLimitedReader(t *testing.T) {
 	var handler = &ConnHandler{}
 	handler.SetUpgrade(func(conn net.Conn) (Context, error) {

@@ -7,6 +7,7 @@ package netpoll
 
 import (
 	"errors"
+	"github.com/hslam/sendfile"
 	"github.com/hslam/splice"
 	"io"
 	"net"
@@ -608,7 +609,7 @@ func (c *conn) Read(b []byte) (n int, err error) {
 	c.rlock.Lock()
 	defer c.rlock.Unlock()
 	n, err = syscall.Read(c.fd, b)
-	if n == 0 || err == syscall.EBADF || err == syscall.ECONNRESET {
+	if err != nil && err != syscall.EAGAIN {
 		err = EOF
 	}
 	if n < 0 {
@@ -627,10 +628,13 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	var retain = len(b)
 	for retain > 0 {
 		n, err = syscall.Write(c.fd, b[len(b)-retain:])
-		if n < 1 || err != nil {
-			return len(b) - retain, err
+		if n > 0 {
+			retain -= n
+			continue
 		}
-		retain -= n
+		if err != syscall.EAGAIN {
+			return len(b) - retain, EOF
+		}
 	}
 	return len(b), nil
 }
@@ -682,7 +686,7 @@ func (c *conn) ReadFrom(r io.Reader) (int64, error) {
 			return 0, nil
 		}
 	}
-	if _, ok := r.(syscall.Conn); ok {
+	if syscallConn, ok := r.(syscall.Conn); ok {
 		if src, ok := r.(net.Conn); ok {
 			if remain <= 0 {
 				remain = bufferSize
@@ -692,6 +696,23 @@ func (c *conn) ReadFrom(r io.Reader) (int64, error) {
 			n, err = splice.Splice(c, src, remain)
 			if err != splice.ErrNotHandled {
 				return n, err
+			}
+		}
+		if raw, err := syscallConn.SyscallConn(); err == nil {
+			var src int
+			raw.Control(func(fd uintptr) {
+				src = int(fd)
+			})
+			if pos, err := syscall.Seek(src, 0, io.SeekCurrent); err == nil {
+				size, _ := syscall.Seek(src, 0, io.SeekEnd)
+				syscall.Seek(src, pos, io.SeekStart)
+				if remain <= 0 || remain > size-pos {
+					remain = size - pos
+				}
+				if remain <= 0 {
+					return 0, nil
+				}
+				return sendfile.SendFile(c, src, pos, remain)
 			}
 		}
 	}
@@ -728,7 +749,6 @@ func genericReadFrom(w io.Writer, r io.Reader, remain int64) (n int64, err error
 		if err != syscall.EAGAIN {
 			return n, err
 		}
-		time.Sleep(time.Microsecond * 10)
 	}
 	return n, nil
 }
