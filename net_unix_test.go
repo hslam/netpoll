@@ -854,10 +854,8 @@ func TestSendFile(t *testing.T) {
 	handler.SetServe(func(context Context) error {
 		conn := context.(net.Conn)
 		buf := make([]byte, len(contents))
-		if n, err := conn.Read(buf); err != nil {
+		if n, err := conn.Read(buf); n <= 0 {
 			return err
-		} else if n != len(contents) {
-			t.Error(n)
 		} else if string(buf) != contents {
 			t.Error(string(buf))
 		}
