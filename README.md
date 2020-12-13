@@ -22,8 +22,6 @@ Package netpoll implements a network poller based on epoll/kqueue.
 
 |Package| [net](https://github.com/golang/go/tree/master/src/net "net")| [netpoll](https://github.com/hslam/netpoll "netpoll")|[gnet](https://github.com/panjf2000/gnet "gnet")|[evio](https://github.com/tidwall/evio "evio")|
 |:--:|:--|:--|:--|:--|
-|Sync handler|Yes|Yes|Yes|Yes|
-|Async handler|Yes|Yes|Yes|Yes|
 |Low memory usage|No|Yes|Yes|Yes|
 |Non-blocking I/O|No|Yes|Yes|Yes|
 |Splice/sendfile|Yes|Yes|No|No|
