@@ -19,6 +19,10 @@ import (
 	"time"
 )
 
+const (
+	idleTime = time.Second
+)
+
 var numCPU = runtime.NumCPU()
 
 // Server defines parameters for running a server.
@@ -281,12 +285,10 @@ func (s *Server) reschedule() (stop bool) {
 	sum := int64(0)
 	for idx, w := range s.workers {
 		w.lock.Lock()
-		running := w.running
-		w.lock.Unlock()
-		if !running {
+		if !w.running {
+			w.lock.Unlock()
 			continue
 		}
-		w.mu.Lock()
 		for _, conn := range w.conns {
 			if uint(idx) < s.unsharedWorkers {
 				s.adjust = append(s.adjust, conn)
@@ -296,7 +298,7 @@ func (s *Server) reschedule() (stop bool) {
 			sum += conn.score
 			s.list = append(s.list, conn)
 		}
-		w.mu.Unlock()
+		w.lock.Unlock()
 	}
 	if len(s.list) == 0 || sum == 0 {
 		return true
@@ -340,16 +342,16 @@ func (s *Server) reschedule() (stop bool) {
 		reschedules[i].lock.Lock()
 		unsharedWorker := s.adjust[i].w
 		sharedWorker := reschedules[i].w
-		unsharedWorker.mu.Lock()
-		sharedWorker.mu.Lock()
+		unsharedWorker.lock.Lock()
+		sharedWorker.lock.Lock()
 		unsharedWorker.decrease(s.adjust[i])
 		s.adjust[i].w = sharedWorker
 		sharedWorker.increase(s.adjust[i])
 		sharedWorker.decrease(reschedules[i])
 		reschedules[i].w = unsharedWorker
 		unsharedWorker.increase(reschedules[i])
-		sharedWorker.mu.Unlock()
-		unsharedWorker.mu.Unlock()
+		sharedWorker.lock.Unlock()
+		unsharedWorker.lock.Unlock()
 		s.adjust[i].lock.Unlock()
 		reschedules[i].lock.Unlock()
 	}
@@ -377,28 +379,28 @@ func (s *Server) Close() error {
 }
 
 type worker struct {
-	index   int
-	server  *Server
-	count   int64
-	mu      sync.Mutex
-	conns   map[int]*conn
-	poll    *Poll
-	events  []Event
-	async   bool
-	jobs    chan func()
-	tasks   chan struct{}
-	done    chan struct{}
-	lock    sync.Mutex
-	running bool
-	slept   int32
-	closed  int32
+	index    int
+	server   *Server
+	count    int64
+	lock     sync.Mutex
+	conns    map[int]*conn
+	lastIdle time.Time
+	poll     *Poll
+	events   []Event
+	async    bool
+	jobs     chan func()
+	tasks    chan struct{}
+	done     chan struct{}
+	running  bool
+	slept    int32
+	closed   int32
 }
 
 func (w *worker) task(job func()) {
 	defer func() { <-w.tasks }()
 	for {
 		job()
-		t := time.NewTimer(time.Second)
+		t := time.NewTimer(idleTime)
 		runtime.Gosched()
 		select {
 		case job = <-w.jobs:
@@ -433,13 +435,7 @@ func (w *worker) Sleep() {
 }
 
 func (w *worker) run(wg *sync.WaitGroup) {
-	defer func() {
-		w.lock.Lock()
-		w.Sleep()
-		w.running = false
-		w.lock.Unlock()
-		wg.Done()
-	}()
+	defer wg.Done()
 	var n int
 	var err error
 	for err == nil {
@@ -468,8 +464,15 @@ func (w *worker) run(wg *sync.WaitGroup) {
 		if n > 0 && w.async {
 			w.server.wakeReschedule()
 		}
-		if atomic.LoadInt64(&w.count) < 1 {
-			return
+		if atomic.LoadInt64(&w.count) < 1 && w.lastIdle.Add(idleTime).Before(time.Now()) {
+			w.lock.Lock()
+			if len(w.conns) == 0 {
+				w.Sleep()
+				w.running = false
+				w.lock.Unlock()
+				return
+			}
+			w.lock.Unlock()
 		}
 		runtime.Gosched()
 	}
@@ -480,13 +483,13 @@ func (w *worker) serve(ev Event) error {
 	if fd == 0 {
 		return nil
 	}
-	w.mu.Lock()
+	w.lock.Lock()
 	c, ok := w.conns[fd]
 	if !ok {
-		w.mu.Unlock()
+		w.lock.Unlock()
 		return nil
 	}
-	w.mu.Unlock()
+	w.lock.Unlock()
 	if atomic.LoadInt32(&c.ready) == 0 {
 		return nil
 	}
@@ -542,9 +545,9 @@ func (w *worker) register(c *conn) error {
 }
 
 func (w *worker) Increase(c *conn) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	w.lock.Lock()
 	w.increase(c)
+	w.lock.Unlock()
 }
 
 func (w *worker) increase(c *conn) {
@@ -554,9 +557,12 @@ func (w *worker) increase(c *conn) {
 }
 
 func (w *worker) Decrease(c *conn) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	w.lock.Lock()
 	w.decrease(c)
+	w.lock.Unlock()
+	if atomic.LoadInt64(&w.count) < 1 {
+		w.lastIdle = time.Now()
+	}
 }
 
 func (w *worker) decrease(c *conn) {
@@ -569,13 +575,13 @@ func (w *worker) Close() {
 	if !atomic.CompareAndSwapInt32(&w.closed, 0, 1) {
 		return
 	}
-	w.mu.Lock()
+	w.lock.Lock()
 	for _, c := range w.conns {
 		c.Close()
 	}
-	w.mu.Unlock()
 	w.Sleep()
 	w.poll.Close()
+	w.lock.Unlock()
 }
 
 type conn struct {
