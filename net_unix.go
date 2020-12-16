@@ -613,8 +613,8 @@ func (c *conn) Read(b []byte) (n int, err error) {
 		c.lock.Unlock()
 	}
 	c.rlock.Lock()
-	defer c.rlock.Unlock()
 	n, err = syscall.Read(c.fd, b)
+	c.rlock.Unlock()
 	if err != nil && err != syscall.EAGAIN || err == nil && n == 0 {
 		err = EOF
 	}
@@ -629,9 +629,8 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
-	c.wlock.Lock()
-	defer c.wlock.Unlock()
 	var retain = len(b)
+	c.wlock.Lock()
 	for retain > 0 {
 		n, err = syscall.Write(c.fd, b[len(b)-retain:])
 		if n > 0 {
@@ -639,9 +638,11 @@ func (c *conn) Write(b []byte) (n int, err error) {
 			continue
 		}
 		if err != syscall.EAGAIN {
+			c.wlock.Unlock()
 			return len(b) - retain, EOF
 		}
 	}
+	c.wlock.Unlock()
 	return len(b), nil
 }
 
