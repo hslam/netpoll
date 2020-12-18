@@ -1,6 +1,6 @@
 # netpoll
 [![PkgGoDev](https://pkg.go.dev/badge/github.com/hslam/netpoll)](https://pkg.go.dev/github.com/hslam/netpoll)
-[![Build Status](https://api.travis-ci.com/hslam/netpoll.svg?branch=master)](https://travis-ci.com/hslam/netpoll)
+[![Build Status](https://github.com/hslam/netpoll/workflows/build/badge.svg)](https://github.com/hslam/netpoll/actions)
 [![codecov](https://codecov.io/gh/hslam/netpoll/branch/master/graph/badge.svg)](https://codecov.io/gh/hslam/netpoll)
 [![Go Report Card](https://goreportcard.com/badge/github.com/hslam/netpoll)](https://goreportcard.com/report/github.com/hslam/netpoll)
 [![LICENSE](https://img.shields.io/github/license/hslam/netpoll.svg?style=flat-square)](https://github.com/hslam/netpoll/blob/master/LICENSE)
