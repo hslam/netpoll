@@ -218,8 +218,8 @@ func TestTCPServer(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
@@ -266,8 +266,8 @@ func TestUNIXServer(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
@@ -316,8 +316,8 @@ func TestOtherServer(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(&testListener{l}); err != nil {
-			t.Error(err)
+		if err := server.Serve(&testListener{l}); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
@@ -362,8 +362,8 @@ func TestShared(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
@@ -408,8 +408,8 @@ func TestNoCopy(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
@@ -446,8 +446,8 @@ func TestServerUpgrade(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
@@ -470,8 +470,8 @@ func TestWorker(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	time.Sleep(time.Millisecond * 10)
@@ -503,8 +503,8 @@ func TestNoAsync(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
@@ -553,8 +553,8 @@ func TestSharedWorkers(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
@@ -809,8 +809,8 @@ func TestSplice(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
@@ -877,8 +877,8 @@ func TestSendFile(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
@@ -922,8 +922,8 @@ func TestReadFromLimitedReader(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
@@ -972,8 +972,8 @@ func TestGenericReadFrom(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)
@@ -1019,8 +1019,8 @@ func TestGenericReadFromRemain(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
-			t.Error(err)
+		if err := server.Serve(l); err == nil {
+			t.Error()
 		}
 	}()
 	conn, _ := net.Dial(network, addr)

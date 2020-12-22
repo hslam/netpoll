@@ -61,7 +61,8 @@ type netServer struct {
 func (s *netServer) Serve(l net.Listener) (err error) {
 	s.listener = l
 	for {
-		conn, err := s.listener.Accept()
+		var conn net.Conn
+		conn, err = s.listener.Accept()
 		if err != nil {
 			break
 		}
@@ -78,7 +79,7 @@ func (s *netServer) Serve(l net.Listener) (err error) {
 			c.Close()
 		}(conn)
 	}
-	return nil
+	return
 }
 
 func (s *netServer) Close() error {

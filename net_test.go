@@ -72,7 +72,7 @@ func TestNetServer(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
+		if err := server.Serve(l); err == nil {
 			t.Error(err)
 		}
 	}()
@@ -109,7 +109,7 @@ func TestNetServerUpgrade(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Serve(l); err != nil {
+		if err := server.Serve(l); err == nil {
 			t.Error(err)
 		}
 	}()
