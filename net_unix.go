@@ -168,7 +168,7 @@ func (s *Server) Serve(l net.Listener) (err error) {
 		runtime.Gosched()
 	}
 	s.wg.Wait()
-	return nil
+	return err
 }
 
 func (s *Server) accept() (err error) {
