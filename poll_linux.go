@@ -83,10 +83,12 @@ func (p *Poll) Wait(events []Event) (n int, err error) {
 		p.events = make([]syscall.EpollEvent, len(events))
 	}
 	n, err = syscall.EpollWait(p.fd, p.events, p.timeout)
-	if err != nil && err != syscall.EINTR {
-		return 0, err
+	if err != nil {
+		if err != syscall.EINTR {
+			return 0, err
+		}
+		err = nil
 	}
-	err = nil
 	for i := 0; i < n; i++ {
 		ev := p.events[i]
 		events[i].Fd = int(ev.Fd)
