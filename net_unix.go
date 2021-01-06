@@ -164,6 +164,7 @@ func (s *Server) Serve(l net.Listener) (err error) {
 			if events[0].Fd == s.fd {
 				err = s.accept()
 			}
+			s.wakeReschedule()
 		}
 		runtime.Gosched()
 	}
@@ -203,7 +204,6 @@ func (s *Server) accept() (err error) {
 		}
 	}
 	w := s.assignWorker()
-	w.Wake(&s.wg)
 	return w.register(&conn{w: w, fd: nfd, raddr: raddr, laddr: s.addr})
 }
 
@@ -252,14 +252,15 @@ func (s *Server) wakeReschedule() {
 			for {
 				select {
 				case <-ticker.C:
+					s.lock.Lock()
 					stop := s.reschedule()
 					if stop {
-						s.lock.Lock()
 						s.wake = false
 						ticker.Stop()
 						s.lock.Unlock()
 						return
 					}
+					s.lock.Unlock()
 				case <-s.done:
 					ticker.Stop()
 					return
@@ -413,27 +414,6 @@ func (w *worker) task(job func()) {
 	}
 }
 
-func (w *worker) Wake(wg *sync.WaitGroup) {
-	w.lock.Lock()
-	if !w.running {
-		w.running = true
-		w.done = make(chan struct{}, 1)
-		atomic.StoreInt32(&w.slept, 0)
-		w.lock.Unlock()
-		wg.Add(1)
-		go w.run(wg)
-	} else {
-		w.lock.Unlock()
-	}
-}
-
-func (w *worker) Sleep() {
-	if !atomic.CompareAndSwapInt32(&w.slept, 0, 1) {
-		return
-	}
-	close(w.done)
-}
-
 func (w *worker) run(wg *sync.WaitGroup) {
 	defer wg.Done()
 	var n int
@@ -461,13 +441,10 @@ func (w *worker) run(wg *sync.WaitGroup) {
 				}
 			}
 		}
-		if n > 0 && w.async {
-			w.server.wakeReschedule()
-		}
-		if atomic.LoadInt64(&w.count) < 1 && w.lastIdle.Add(idleTime).Before(time.Now()) {
+		if atomic.LoadInt64(&w.count) < 1 {
 			w.lock.Lock()
-			if len(w.conns) == 0 {
-				w.Sleep()
+			if len(w.conns) == 0 && w.lastIdle.Add(idleTime).Before(time.Now()) {
+				w.sleep()
 				w.running = false
 				w.lock.Unlock()
 				return
@@ -547,6 +524,7 @@ func (w *worker) register(c *conn) error {
 func (w *worker) Increase(c *conn) {
 	w.lock.Lock()
 	w.increase(c)
+	w.wake(&w.server.wg)
 	w.lock.Unlock()
 }
 
@@ -559,16 +537,33 @@ func (w *worker) increase(c *conn) {
 func (w *worker) Decrease(c *conn) {
 	w.lock.Lock()
 	w.decrease(c)
-	w.lock.Unlock()
 	if atomic.LoadInt64(&w.count) < 1 {
 		w.lastIdle = time.Now()
 	}
+	w.lock.Unlock()
 }
 
 func (w *worker) decrease(c *conn) {
 	w.poll.Unregister(c.fd)
 	atomic.AddInt64(&w.count, -1)
 	delete(w.conns, c.fd)
+}
+
+func (w *worker) wake(wg *sync.WaitGroup) {
+	if !w.running {
+		w.running = true
+		w.done = make(chan struct{}, 1)
+		atomic.StoreInt32(&w.slept, 0)
+		wg.Add(1)
+		go w.run(wg)
+	}
+}
+
+func (w *worker) sleep() {
+	if !atomic.CompareAndSwapInt32(&w.slept, 0, 1) {
+		return
+	}
+	close(w.done)
 }
 
 func (w *worker) Close() {
@@ -578,8 +573,9 @@ func (w *worker) Close() {
 	w.lock.Lock()
 	for _, c := range w.conns {
 		c.Close()
+		delete(w.conns, c.fd)
 	}
-	w.Sleep()
+	w.sleep()
 	w.poll.Close()
 	w.lock.Unlock()
 }
