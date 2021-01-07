@@ -92,7 +92,7 @@ func (h *ConnHandler) Serve(ctx Context) error {
 
 // DataHandler implements the Handler interface.
 type DataHandler struct {
-	// NoShared disables the DataHandler for high performance.
+	// NoShared disables the DataHandler to use the buffer pool for high performance.
 	// Default NoShared is false to use the buffer pool for low memory usage.
 	NoShared bool
 	// NoCopy returns the bytes underlying buffer when NoCopy is true,
