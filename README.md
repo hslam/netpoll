@@ -50,7 +50,7 @@ import "github.com/hslam/netpoll"
 
 func main() {
 	var handler = &netpoll.DataHandler{
-		Shared:     false,
+		NoShared:   true,
 		NoCopy:     true,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -77,7 +77,7 @@ import (
 
 func main() {
 	var handler = &netpoll.DataHandler{
-		Shared:     false,
+		NoShared:   true,
 		NoCopy:     true,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {

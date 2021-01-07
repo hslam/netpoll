@@ -481,7 +481,6 @@ func (w *worker) serveConn(c *conn) error {
 		err := w.server.Handler.Serve(c.context)
 		if err != nil {
 			if err == syscall.EAGAIN {
-				runtime.Gosched()
 				return nil
 			}
 			if !atomic.CompareAndSwapInt32(&c.closing, 0, 1) {

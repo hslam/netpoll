@@ -55,7 +55,7 @@ func TestServerServe(t *testing.T) {
 
 func TestServerPoll(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -88,7 +88,7 @@ func TestServerPoll(t *testing.T) {
 
 func TestServerClose(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -117,7 +117,7 @@ func TestServerClose(t *testing.T) {
 
 func TestServerNumCPU(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -148,7 +148,7 @@ func TestServerNumCPU(t *testing.T) {
 
 func TestServerTCPListener(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -171,7 +171,7 @@ func TestServerTCPListener(t *testing.T) {
 
 func TestServerUNIXListener(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -194,7 +194,7 @@ func TestServerUNIXListener(t *testing.T) {
 
 func TestTCPServer(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -245,7 +245,7 @@ func TestTCPServer(t *testing.T) {
 
 func TestUNIXServer(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -295,9 +295,8 @@ func TestOtherServer(t *testing.T) {
 	type testListener struct {
 		net.Listener
 	}
-
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -343,7 +342,7 @@ func TestOtherServer(t *testing.T) {
 
 func TestShared(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     true,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -389,7 +388,7 @@ func TestShared(t *testing.T) {
 
 func TestNoCopy(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   true,
 		NoCopy:     true,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -484,7 +483,7 @@ func TestWorker(t *testing.T) {
 
 func TestNoAsync(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   true,
 		NoCopy:     true,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -531,7 +530,7 @@ func TestNoAsync(t *testing.T) {
 
 func TestSharedWorkers(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   true,
 		NoCopy:     true,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -581,7 +580,7 @@ func TestSharedWorkers(t *testing.T) {
 
 func TestSharedWorkersPanic(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   true,
 		NoCopy:     true,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -608,7 +607,7 @@ func TestSharedWorkersPanic(t *testing.T) {
 
 func TestReschedule(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -671,7 +670,7 @@ func TestReschedule(t *testing.T) {
 
 func TestRescheduleDone(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {

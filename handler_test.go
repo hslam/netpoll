@@ -77,7 +77,7 @@ func TestConnHandler(t *testing.T) {
 
 func TestDataHandler(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   true,
 		NoCopy:     false,
 		BufferSize: 0,
 	}

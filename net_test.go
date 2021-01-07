@@ -13,7 +13,7 @@ import (
 
 func TestListenAndServe(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -33,7 +33,7 @@ func TestListenAndServe(t *testing.T) {
 
 func TestServe(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   false,
 		NoCopy:     false,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {
@@ -54,7 +54,7 @@ func TestServe(t *testing.T) {
 
 func TestNetServer(t *testing.T) {
 	var handler = &DataHandler{
-		Shared:     false,
+		NoShared:   true,
 		NoCopy:     true,
 		BufferSize: 1024,
 		HandlerFunc: func(req []byte) (res []byte) {

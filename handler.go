@@ -92,8 +92,9 @@ func (h *ConnHandler) Serve(ctx Context) error {
 
 // DataHandler implements the Handler interface.
 type DataHandler struct {
-	// Shared enables the DataHandler to use the buffer pool for low memory usage.
-	Shared bool
+	// NoShared disables the DataHandler for high performance.
+	// Default NoShared is false to use the buffer pool for low memory usage.
+	NoShared bool
 	// NoCopy returns the bytes underlying buffer when NoCopy is true,
 	// The bytes returned is shared by all invocations of Read, so do not modify it.
 	// Default NoCopy is false to make a copy of data for every invocations of Read.
@@ -138,10 +139,10 @@ func (h *DataHandler) Upgrade(conn net.Conn) (Context, error) {
 		}
 	}
 	var ctx = &context{upgrade: upgrade, conn: conn}
-	if h.Shared {
-		ctx.pool = assignPool(h.BufferSize)
-	} else {
+	if h.NoShared {
 		ctx.buffer = make([]byte, h.BufferSize)
+	} else {
+		ctx.pool = assignPool(h.BufferSize)
 	}
 	return ctx, nil
 }
@@ -154,11 +155,10 @@ func (h *DataHandler) Serve(ctx Context) error {
 	var err error
 	var buf []byte
 	var req []byte
-	if h.Shared {
-		buf = c.pool.Get().([]byte)
-		defer c.pool.Put(buf)
-	} else {
+	if h.NoShared {
 		buf = c.buffer
+	} else {
+		buf = c.pool.Get().([]byte)
 	}
 	if c.upgrade {
 		c.reading.Lock()
@@ -168,6 +168,9 @@ func (h *DataHandler) Serve(ctx Context) error {
 		c.reading.Unlock()
 	}
 	if err != nil {
+		if !h.NoShared {
+			c.pool.Put(buf)
+		}
 		return err
 	}
 	req = buf[:n]
@@ -182,6 +185,9 @@ func (h *DataHandler) Serve(ctx Context) error {
 	_, err = conn.Write(res)
 	if c.upgrade {
 		c.writing.Unlock()
+	}
+	if !h.NoShared {
+		c.pool.Put(buf)
 	}
 	return err
 }
