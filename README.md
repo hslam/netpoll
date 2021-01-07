@@ -15,7 +15,6 @@ Package netpoll implements a network poller based on epoll/kqueue.
 * Upgrade connection
 * Non-blocking I/O
 * [Splice](https://github.com/hslam/splice "splice")/[sendfile](https://github.com/hslam/sendfile "sendfile")
-* Sync/async workers
 * Rescheduling workers
 
 **Comparison to other packages.**
