@@ -1069,3 +1069,15 @@ func TestTopK(t *testing.T) {
 		}
 	}
 }
+
+func TestMinHeap(t *testing.T) {
+	{
+		l := workers{&worker{count: 10}, &worker{count: 7}, &worker{count: 2}, &worker{count: 5}, &worker{count: 1}}
+		minHeap(l)
+		for j := 1; j < l.Len(); j++ {
+			if !l.Less(0, j) {
+				t.Error("minHeap error")
+			}
+		}
+	}
+}

@@ -42,6 +42,7 @@ type Server struct {
 	fd              int
 	poll            *Poll
 	workers         []*worker
+	heap            []*worker
 	rescheduled     bool
 	lock            sync.Mutex
 	wake            bool
@@ -155,6 +156,9 @@ func (s *Server) Serve(l net.Listener) (err error) {
 			tasks:  make(chan struct{}, s.tasksPerWorker),
 		}
 		s.workers = append(s.workers, w)
+		if i >= int(s.unsharedWorkers) {
+			s.heap = append(s.heap, w)
+		}
 	}
 	s.done = make(chan struct{}, 1)
 	var n int
@@ -203,8 +207,11 @@ func (s *Server) accept() (err error) {
 			Zone: zone,
 		}
 	}
+	s.lock.Lock()
 	w := s.assignWorker()
-	return w.register(&conn{w: w, fd: nfd, raddr: raddr, laddr: s.addr})
+	err = w.register(&conn{w: w, fd: nfd, raddr: raddr, laddr: s.addr})
+	s.lock.Unlock()
+	return
 }
 
 func (s *Server) assignWorker() (w *worker) {
@@ -226,17 +233,8 @@ func (s *Server) idleUnsharedWorkers() (w *worker) {
 }
 
 func (s *Server) leastConnectedSharedWorkers() (w *worker) {
-	min := s.workers[s.unsharedWorkers].count
-	index := int(s.unsharedWorkers)
-	if len(s.workers) > int(s.unsharedWorkers) {
-		for i := int(s.unsharedWorkers) + 1; i < len(s.workers); i++ {
-			if s.workers[i].count < min {
-				min = s.workers[i].count
-				index = i
-			}
-		}
-	}
-	return s.workers[index]
+	minHeap(s.heap)
+	return s.heap[0]
 }
 
 func (s *Server) wakeReschedule() {
@@ -785,6 +783,21 @@ func (c *rawConn) Write(f func(fd uintptr) (done bool)) error {
 	return nil
 }
 
+type workers []*worker
+
+func (l workers) Len() int { return len(l) }
+func (l workers) Less(i, j int) bool {
+	return l[i].count < l[j].count
+}
+func (l workers) Swap(i, j int) { l[i], l[j] = l[j], l[i] }
+
+func minHeap(h workers) {
+	n := h.Len()
+	for i := n/2 - 1; i >= 0; i-- {
+		heapDown(h, i, n)
+	}
+}
+
 type list []*conn
 
 func (l list) Len() int { return len(l) }
@@ -811,7 +824,17 @@ func topK(h list, k int) {
 	}
 }
 
-func heapDown(h list, i, n int) bool {
+type sort interface {
+	// Len is the number of elements in the collection.
+	Len() int
+	// Less reports whether the element with
+	// index i should sort before the element with index j.
+	Less(i, j int) bool
+	// Swap swaps the elements with indexes i and j.
+	Swap(i, j int)
+}
+
+func heapDown(h sort, i, n int) bool {
 	parent := i
 	for {
 		leftChild := 2*parent + 1
