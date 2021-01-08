@@ -54,25 +54,28 @@ func (p *Poll) SetTimeout(d time.Duration) (err error) {
 // Register registers a file descriptor.
 func (p *Poll) Register(fd int) (err error) {
 	event := p.pool.Get().(syscall.EpollEvent)
-	defer p.pool.Put(event)
 	event.Fd, event.Events = int32(fd), syscall.EPOLLIN
-	return syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_ADD, fd, &event)
+	err = syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_ADD, fd, &event)
+	p.pool.Put(event)
+	return
 }
 
 // Write adds a write event.
 func (p *Poll) Write(fd int) (err error) {
 	event := p.pool.Get().(syscall.EpollEvent)
-	defer p.pool.Put(event)
 	event.Fd, event.Events = int32(fd), syscall.EPOLLIN|syscall.EPOLLOUT
-	return syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_MOD, fd, &event)
+	err = syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_MOD, fd, &event)
+	p.pool.Put(event)
+	return
 }
 
 // Unregister unregisters a file descriptor.
 func (p *Poll) Unregister(fd int) (err error) {
 	event := p.pool.Get().(syscall.EpollEvent)
-	defer p.pool.Put(event)
 	event.Fd, event.Events = int32(fd), syscall.EPOLLIN|syscall.EPOLLOUT
-	return syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_DEL, fd, &event)
+	err = syscall.EpollCtl(p.fd, syscall.EPOLL_CTL_DEL, fd, &event)
+	p.pool.Put(event)
+	return
 }
 
 // Wait waits events.

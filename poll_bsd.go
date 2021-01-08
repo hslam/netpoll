@@ -55,28 +55,28 @@ func (p *Poll) SetTimeout(d time.Duration) (err error) {
 // Register registers a file descriptor.
 func (p *Poll) Register(fd int) (err error) {
 	changes := p.pool.Get().([]syscall.Kevent_t)
-	defer p.pool.Put(changes)
 	changes[0].Ident, changes[0].Flags = uint64(fd), syscall.EV_ADD
 	_, err = syscall.Kevent(p.fd, changes[:1], nil, nil)
+	p.pool.Put(changes)
 	return
 }
 
 // Write adds a write event.
 func (p *Poll) Write(fd int) (err error) {
 	changes := p.pool.Get().([]syscall.Kevent_t)
-	defer p.pool.Put(changes)
 	changes[1].Ident, changes[1].Flags = uint64(fd), syscall.EV_ADD
 	_, err = syscall.Kevent(p.fd, changes[1:], nil, nil)
+	p.pool.Put(changes)
 	return
 }
 
 // Unregister unregisters a file descriptor.
 func (p *Poll) Unregister(fd int) (err error) {
 	changes := p.pool.Get().([]syscall.Kevent_t)
-	defer p.pool.Put(changes)
 	changes[0].Ident, changes[0].Flags = uint64(fd), syscall.EV_DELETE
 	changes[1].Ident, changes[1].Flags = uint64(fd), syscall.EV_DELETE
 	_, err = syscall.Kevent(p.fd, changes, nil, nil)
+	p.pool.Put(changes)
 	return
 }
 
