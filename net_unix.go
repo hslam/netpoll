@@ -521,7 +521,6 @@ func (w *worker) register(c *conn) error {
 func (w *worker) Increase(c *conn) {
 	w.lock.Lock()
 	w.increase(c)
-	w.wake(&w.server.wg)
 	w.lock.Unlock()
 }
 
@@ -529,30 +528,30 @@ func (w *worker) increase(c *conn) {
 	w.conns[c.fd] = c
 	atomic.AddInt64(&w.count, 1)
 	w.poll.Register(c.fd)
+	w.wake()
 }
 
 func (w *worker) Decrease(c *conn) {
 	w.lock.Lock()
 	w.decrease(c)
-	if atomic.LoadInt64(&w.count) < 1 {
-		w.lastIdle = time.Now()
-	}
 	w.lock.Unlock()
 }
 
 func (w *worker) decrease(c *conn) {
 	w.poll.Unregister(c.fd)
-	atomic.AddInt64(&w.count, -1)
 	delete(w.conns, c.fd)
+	if atomic.AddInt64(&w.count, -1) < 1 {
+		w.lastIdle = time.Now()
+	}
 }
 
-func (w *worker) wake(wg *sync.WaitGroup) {
+func (w *worker) wake() {
 	if !w.running {
 		w.running = true
 		w.done = make(chan struct{}, 1)
 		atomic.StoreInt32(&w.slept, 0)
-		wg.Add(1)
-		go w.run(wg)
+		w.server.wg.Add(1)
+		go w.run(&w.server.wg)
 	}
 }
 
