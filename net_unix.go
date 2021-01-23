@@ -621,17 +621,17 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
-	var retain = len(b)
+	var remain = len(b)
 	c.wlock.Lock()
-	for retain > 0 {
-		n, err = syscall.Write(c.fd, b[len(b)-retain:])
+	for remain > 0 {
+		n, err = syscall.Write(c.fd, b[len(b)-remain:])
 		if n > 0 {
-			retain -= n
+			remain -= n
 			continue
 		}
 		if err != syscall.EAGAIN {
 			c.wlock.Unlock()
-			return len(b) - retain, EOF
+			return len(b) - remain, EOF
 		}
 	}
 	c.wlock.Unlock()
@@ -730,17 +730,17 @@ func genericReadFrom(w io.Writer, r io.Reader, remain int64) (n int64, err error
 	pool := assignPool(int(remain))
 	buf := pool.Get().([]byte)
 	defer pool.Put(buf)
-	var retain int
-	retain, err = r.Read(buf)
+	var nr int
+	nr, err = r.Read(buf)
 	if err != nil {
 		return 0, err
 	}
 	var out int
 	var pos int
-	for retain > 0 {
-		out, err = w.Write(buf[pos : pos+retain])
+	for nr > 0 {
+		out, err = w.Write(buf[pos : pos+nr])
 		if out > 0 {
-			retain -= out
+			nr -= out
 			n += int64(out)
 			pos += out
 			continue
