@@ -2,5 +2,5 @@ github.com/hslam/mmap v1.0.0 h1:GSp55lZrPDhctob3yE0SqESBjzgCn9cP4iu4Pmmm+gE=
 github.com/hslam/mmap v1.0.0/go.mod h1:mtuj54WoaupC65QteY9RubXVPkQT86Q/Xj0WPzRefFw=
 github.com/hslam/sendfile v1.0.0 h1:kAOsxqvTyHseaUC7smR6uqpKQFFkuizhEtVITuluxn0=
 github.com/hslam/sendfile v1.0.0/go.mod h1:IVInXNh7ccvv6fdFkcC3gRGCH7E+fRsTlyBnftCAk5A=
-github.com/hslam/splice v1.0.1 h1:kaSQzUWm6t0bkQKLw4BT77+Z0G/0cacGAj9lxQjw26c=
-github.com/hslam/splice v1.0.1/go.mod h1:7D1QlFptoG0ruXzcAwpzckKxUN4+ZpvrIhwfbcAQcx8=
+github.com/hslam/splice v1.0.2 h1:DJ6/4xpnqEqVKv1L38wAvCGEibP53Jtrqzjr+lNewUc=
+github.com/hslam/splice v1.0.2/go.mod h1:7D1QlFptoG0ruXzcAwpzckKxUN4+ZpvrIhwfbcAQcx8=
