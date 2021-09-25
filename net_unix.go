@@ -1,12 +1,14 @@
 // Copyright (c) 2020 Meng Huang (mhboy@outlook.com)
 // This package is licensed under a MIT license that can be found in the LICENSE file.
 
+//go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd
 // +build linux darwin dragonfly freebsd netbsd openbsd
 
 package netpoll
 
 import (
 	"errors"
+	"github.com/hslam/scheduler"
 	"github.com/hslam/sendfile"
 	"github.com/hslam/splice"
 	"io"
@@ -35,7 +37,6 @@ type Server struct {
 	NoAsync         bool
 	UnsharedWorkers int
 	SharedWorkers   int
-	TasksPerWorker  int
 	addr            net.Addr
 	netServer       *netServer
 	file            *os.File
@@ -51,7 +52,7 @@ type Server struct {
 	adjust          list
 	unsharedWorkers uint
 	sharedWorkers   uint
-	tasksPerWorker  uint
+	sched           scheduler.Scheduler
 	wg              sync.WaitGroup
 	closed          int32
 	done            chan struct{}
@@ -96,11 +97,6 @@ func (s *Server) Serve(l net.Listener) (err error) {
 		s.sharedWorkers = uint(s.SharedWorkers)
 	} else {
 		panic("SharedWorkers < 0")
-	}
-	if s.TasksPerWorker == 0 {
-		s.tasksPerWorker = uint(numCPU)
-	} else if s.TasksPerWorker > 0 {
-		s.tasksPerWorker = uint(s.TasksPerWorker)
 	}
 	if l == nil {
 		return ErrListener
@@ -152,14 +148,13 @@ func (s *Server) Serve(l net.Listener) (err error) {
 			events: make([]Event, 0x400),
 			async:  async,
 			done:   make(chan struct{}, 1),
-			jobs:   make(chan func()),
-			tasks:  make(chan struct{}, s.tasksPerWorker),
 		}
 		s.workers = append(s.workers, w)
 		if i >= int(s.unsharedWorkers) {
 			s.heap = append(s.heap, w)
 		}
 	}
+	s.sched = scheduler.New(scheduler.Unlimited, &scheduler.Options{Threshold: 1})
 	s.done = make(chan struct{}, 1)
 	var n int
 	var events = make([]Event, 1)
@@ -371,6 +366,7 @@ func (s *Server) Close() error {
 	if err := s.file.Close(); err != nil {
 		return err
 	}
+	s.sched.Close()
 	if s.done != nil {
 		close(s.done)
 	}
@@ -387,29 +383,10 @@ type worker struct {
 	poll     *Poll
 	events   []Event
 	async    bool
-	jobs     chan func()
-	tasks    chan struct{}
 	done     chan struct{}
 	running  bool
 	slept    int32
 	closed   int32
-}
-
-func (w *worker) task(job func()) {
-	defer func() { <-w.tasks }()
-	for {
-		job()
-		t := time.NewTimer(idleTime)
-		runtime.Gosched()
-		select {
-		case job = <-w.jobs:
-			t.Stop()
-		case <-t.C:
-			return
-		case <-w.done:
-			return
-		}
-	}
 }
 
 func (w *worker) run(wg *sync.WaitGroup) {
@@ -423,17 +400,10 @@ func (w *worker) run(wg *sync.WaitGroup) {
 				ev := w.events[i]
 				if w.async {
 					wg.Add(1)
-					job := func() {
+					w.server.sched.Schedule(func() {
 						w.serve(ev)
 						wg.Done()
-					}
-					select {
-					case w.jobs <- job:
-					case w.tasks <- struct{}{}:
-						go w.task(job)
-					default:
-						go job()
-					}
+					})
 				} else {
 					w.serve(ev)
 				}
