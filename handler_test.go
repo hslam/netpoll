@@ -10,15 +10,6 @@ import (
 	"time"
 )
 
-func TestAssignPool(t *testing.T) {
-	p := assignPool(1024)
-	b := p.Get().([]byte)
-	if len(b) < 1024 {
-		t.Error(len(b))
-	}
-	assignPool(1024)
-}
-
 func TestNewHandler(t *testing.T) {
 	var handler = NewHandler(func(conn net.Conn) (Context, error) {
 		if n, err := conn.Write([]byte("")); err != nil {

@@ -8,6 +8,7 @@ package netpoll
 
 import (
 	"errors"
+	"github.com/hslam/buffer"
 	"github.com/hslam/scheduler"
 	"github.com/hslam/sendfile"
 	"github.com/hslam/splice"
@@ -25,7 +26,10 @@ const (
 	idleTime = time.Second
 )
 
-var numCPU = runtime.NumCPU()
+var (
+	numCPU  = runtime.NumCPU()
+	buffers = buffer.NewBuffers(1024)
+)
 
 // Server defines parameters for running a server.
 type Server struct {
@@ -697,9 +701,9 @@ func genericReadFrom(w io.Writer, r io.Reader, remain int64) (n int64, err error
 	} else if remain > bufferSize {
 		remain = bufferSize
 	}
-	pool := assignPool(int(remain))
-	buf := pool.Get().([]byte)
-	defer pool.Put(buf)
+	pool := buffers.AssignPool(int(remain))
+	buf := pool.GetBuffer(int(remain))
+	defer pool.PutBuffer(buf)
 	var nr int
 	nr, err = r.Read(buf)
 	if err != nil {

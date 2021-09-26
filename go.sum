@@ -1,3 +1,5 @@
+github.com/hslam/buffer v0.0.0-20210926124055-86667d87033c h1:wxwQJEvKW1MuUxTtoxsZsDHxS9CObyx4Z0TjfTgLbrU=
+github.com/hslam/buffer v0.0.0-20210926124055-86667d87033c/go.mod h1:Gvbj40hnzR54zoUOuDZqDi7aziar8UlkHXk6NVYLg2U=
 github.com/hslam/mmap v1.0.0 h1:GSp55lZrPDhctob3yE0SqESBjzgCn9cP4iu4Pmmm+gE=
 github.com/hslam/mmap v1.0.0/go.mod h1:mtuj54WoaupC65QteY9RubXVPkQT86Q/Xj0WPzRefFw=
 github.com/hslam/scheduler v0.0.0-20210925152536-23dd274e98f6 h1:dBBtRI5QqvizcdxkI/jR22mCkkj7J2bJHt1sGnDgwB0=
