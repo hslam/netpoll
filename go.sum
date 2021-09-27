@@ -2,8 +2,8 @@ github.com/hslam/buffer v0.0.0-20210926124055-86667d87033c h1:wxwQJEvKW1MuUxTtox
 github.com/hslam/buffer v0.0.0-20210926124055-86667d87033c/go.mod h1:Gvbj40hnzR54zoUOuDZqDi7aziar8UlkHXk6NVYLg2U=
 github.com/hslam/mmap v1.0.0 h1:GSp55lZrPDhctob3yE0SqESBjzgCn9cP4iu4Pmmm+gE=
 github.com/hslam/mmap v1.0.0/go.mod h1:mtuj54WoaupC65QteY9RubXVPkQT86Q/Xj0WPzRefFw=
-github.com/hslam/scheduler v0.0.0-20210926215301-dc2f9e294255 h1:qAgAUDju8pfUrkdsCnQIuTAB7/roPXmMASoLQUhagpo=
-github.com/hslam/scheduler v0.0.0-20210926215301-dc2f9e294255/go.mod h1:5Lu1StnE7hhW2QwdImTNFLdzIUhAUjO7SlLco+H5h9A=
+github.com/hslam/scheduler v0.0.0-20210927190836-9047c221c014 h1:3KOzggOEvMsmkPbCRZ4GyeNGxW75Ew7GW4n/S1bOUlY=
+github.com/hslam/scheduler v0.0.0-20210927190836-9047c221c014/go.mod h1:5Lu1StnE7hhW2QwdImTNFLdzIUhAUjO7SlLco+H5h9A=
 github.com/hslam/sendfile v1.0.1 h1:0OLb5VRwjdN3q9hkslfk5nPQIrH5UmGTjSuJtV4Zq+8=
 github.com/hslam/sendfile v1.0.1/go.mod h1:IVInXNh7ccvv6fdFkcC3gRGCH7E+fRsTlyBnftCAk5A=
 github.com/hslam/splice v1.0.3 h1:CwSmzu6AAm8sb2wYgSGvTwixy3seqA6xJ9NXQ0ff3j4=
