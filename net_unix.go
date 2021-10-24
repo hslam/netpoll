@@ -56,7 +56,6 @@ type Server struct {
 	adjust          list
 	unsharedWorkers uint
 	sharedWorkers   uint
-	sched           scheduler.Scheduler
 	wg              sync.WaitGroup
 	closed          int32
 	done            chan struct{}
@@ -140,9 +139,9 @@ func (s *Server) Serve(l net.Listener) (err error) {
 		if err != nil {
 			return err
 		}
-		var async bool
+		var sched scheduler.Scheduler
 		if i >= int(s.unsharedWorkers) && !s.NoAsync {
-			async = true
+			sched = scheduler.New(scheduler.Unlimited, &scheduler.Options{Threshold: 1})
 		}
 		w := &worker{
 			index:  i,
@@ -150,7 +149,7 @@ func (s *Server) Serve(l net.Listener) (err error) {
 			conns:  make(map[int]*conn),
 			poll:   p,
 			events: make([]Event, 0x400),
-			async:  async,
+			sched:  sched,
 			done:   make(chan struct{}, 1),
 		}
 		s.workers = append(s.workers, w)
@@ -158,7 +157,6 @@ func (s *Server) Serve(l net.Listener) (err error) {
 			s.heap = append(s.heap, w)
 		}
 	}
-	s.sched = scheduler.New(scheduler.Unlimited, &scheduler.Options{Threshold: 1})
 	s.done = make(chan struct{}, 1)
 	var n int
 	var events = make([]Event, 1)
@@ -309,7 +307,7 @@ func (s *Server) reschedule() (stop bool) {
 	index := 0
 	for _, conn := range s.list[:unsharedWorkers] {
 		conn.lock.Lock()
-		if conn.w.async {
+		if conn.w.sched != nil {
 			conn.lock.Unlock()
 			s.list[index] = conn
 			index++
@@ -370,7 +368,6 @@ func (s *Server) Close() error {
 	if err := s.file.Close(); err != nil {
 		return err
 	}
-	s.sched.Close()
 	if s.done != nil {
 		close(s.done)
 	}
@@ -386,7 +383,7 @@ type worker struct {
 	lastIdle time.Time
 	poll     *Poll
 	events   []Event
-	async    bool
+	sched    scheduler.Scheduler
 	done     chan struct{}
 	running  bool
 	slept    int32
@@ -402,9 +399,9 @@ func (w *worker) run(wg *sync.WaitGroup) {
 		if n > 0 {
 			for i := range w.events[:n] {
 				ev := w.events[i]
-				if w.async {
+				if w.sched != nil {
 					wg.Add(1)
-					w.server.sched.Schedule(func() {
+					w.sched.Schedule(func() {
 						w.serve(ev)
 						wg.Done()
 					})
@@ -548,6 +545,9 @@ func (w *worker) Close() {
 	w.sleep()
 	w.poll.Close()
 	w.lock.Unlock()
+	if w.sched != nil {
+		w.sched.Close()
+	}
 }
 
 type conn struct {
