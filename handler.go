@@ -121,7 +121,7 @@ func (h *DataHandler) Upgrade(conn net.Conn) (Context, error) {
 	if h.NoShared {
 		ctx.buffer = make([]byte, h.BufferSize)
 	} else {
-		ctx.pool = buffers.AssignPool(h.BufferSize)
+		ctx.pool = buffer.AssignPool(h.BufferSize)
 	}
 	return ctx, nil
 }

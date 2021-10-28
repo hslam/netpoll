@@ -27,8 +27,7 @@ const (
 )
 
 var (
-	numCPU  = runtime.NumCPU()
-	buffers = buffer.NewBuffers(1024)
+	numCPU = runtime.NumCPU()
 )
 
 // Server defines parameters for running a server.
@@ -701,7 +700,7 @@ func genericReadFrom(w io.Writer, r io.Reader, remain int64) (n int64, err error
 	} else if remain > bufferSize {
 		remain = bufferSize
 	}
-	pool := buffers.AssignPool(int(remain))
+	pool := buffer.AssignPool(int(remain))
 	buf := pool.GetBuffer(int(remain))
 	defer pool.PutBuffer(buf)
 	var nr int
