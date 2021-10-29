@@ -192,6 +192,9 @@ func (s *Server) accept() (err error) {
 			IP:   append([]byte{}, sockaddr.Addr[:]...),
 			Port: sockaddr.Port,
 		}
+		if err := syscall.SetsockoptInt(nfd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1); err != nil {
+			return err
+		}
 	case *syscall.SockaddrInet6:
 		var zone string
 		if ifi, err := net.InterfaceByIndex(int(sockaddr.ZoneId)); err == nil {
@@ -201,6 +204,9 @@ func (s *Server) accept() (err error) {
 			IP:   append([]byte{}, sockaddr.Addr[:]...),
 			Port: sockaddr.Port,
 			Zone: zone,
+		}
+		if err := syscall.SetsockoptInt(nfd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1); err != nil {
+			return err
 		}
 	}
 	s.lock.Lock()
