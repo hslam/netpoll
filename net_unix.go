@@ -138,9 +138,9 @@ func (s *Server) Serve(l net.Listener) (err error) {
 		if err != nil {
 			return err
 		}
-		var sched scheduler.Scheduler
+		var async bool
 		if i >= int(s.unsharedWorkers) && !s.NoAsync {
-			sched = scheduler.New(scheduler.Unlimited, &scheduler.Options{Threshold: 1})
+			async = true
 		}
 		w := &worker{
 			index:  i,
@@ -148,7 +148,7 @@ func (s *Server) Serve(l net.Listener) (err error) {
 			conns:  make(map[int]*conn),
 			poll:   p,
 			events: make([]Event, 0x400),
-			sched:  sched,
+			async:  async,
 			done:   make(chan struct{}, 1),
 		}
 		s.workers = append(s.workers, w)
@@ -312,7 +312,7 @@ func (s *Server) reschedule() (stop bool) {
 	index := 0
 	for _, conn := range s.list[:unsharedWorkers] {
 		conn.lock.Lock()
-		if conn.w.sched != nil {
+		if conn.w.async {
 			conn.lock.Unlock()
 			s.list[index] = conn
 			index++
@@ -388,7 +388,7 @@ type worker struct {
 	lastIdle time.Time
 	poll     *Poll
 	events   []Event
-	sched    scheduler.Scheduler
+	async    bool
 	done     chan struct{}
 	running  bool
 	slept    int32
@@ -404,9 +404,9 @@ func (w *worker) run(wg *sync.WaitGroup) {
 		if n > 0 {
 			for i := range w.events[:n] {
 				ev := w.events[i]
-				if w.sched != nil {
+				if w.async {
 					wg.Add(1)
-					w.sched.Schedule(func() {
+					scheduler.Schedule(func() {
 						w.serve(ev)
 						wg.Done()
 					})
@@ -550,9 +550,6 @@ func (w *worker) Close() {
 	w.sleep()
 	w.poll.Close()
 	w.lock.Unlock()
-	if w.sched != nil {
-		w.sched.Close()
-	}
 }
 
 type conn struct {
