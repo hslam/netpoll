@@ -270,6 +270,7 @@ func TestUNIXServer(t *testing.T) {
 			t.Error()
 		}
 	}()
+	time.Sleep(time.Millisecond * 10)
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
 	msg = strings.Repeat(msg, 50)
@@ -319,6 +320,7 @@ func TestOtherServer(t *testing.T) {
 			t.Error()
 		}
 	}()
+	time.Sleep(time.Millisecond * 10)
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
 	msg = strings.Repeat(msg, 50)
@@ -365,6 +367,7 @@ func TestShared(t *testing.T) {
 			t.Error()
 		}
 	}()
+	time.Sleep(time.Millisecond * 10)
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
 	msg = strings.Repeat(msg, 50)
@@ -411,6 +414,7 @@ func TestNoCopy(t *testing.T) {
 			t.Error()
 		}
 	}()
+	time.Sleep(time.Millisecond * 10)
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
 	msg = strings.Repeat(msg, 50)
@@ -449,6 +453,7 @@ func TestServerUpgrade(t *testing.T) {
 			t.Error()
 		}
 	}()
+	time.Sleep(time.Millisecond * 10)
 	conn, _ := net.Dial(network, addr)
 	time.Sleep(time.Millisecond * 10)
 	conn.Close()
@@ -506,6 +511,7 @@ func TestNoAsync(t *testing.T) {
 			t.Error()
 		}
 	}()
+	time.Sleep(time.Millisecond * 10)
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
 	msg = strings.Repeat(msg, 50)
@@ -555,6 +561,7 @@ func TestSharedWorkers(t *testing.T) {
 			t.Error()
 		}
 	}()
+	time.Sleep(time.Millisecond * 10)
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
 	msg = strings.Repeat(msg, 50)
@@ -627,6 +634,7 @@ func TestReschedule(t *testing.T) {
 		defer wg.Done()
 		server.Serve(l)
 	}()
+	time.Sleep(time.Millisecond * 10)
 	connWG := sync.WaitGroup{}
 	for i := 0; i < 20; i++ {
 		connWG.Add(1)
@@ -690,6 +698,7 @@ func TestRescheduleDone(t *testing.T) {
 		defer wg.Done()
 		server.Serve(l)
 	}()
+	time.Sleep(time.Millisecond * 10)
 	connWG := sync.WaitGroup{}
 	for i := 0; i < 32; i++ {
 		connWG.Add(1)
@@ -811,6 +820,7 @@ func TestSplice(t *testing.T) {
 			t.Error()
 		}
 	}()
+	time.Sleep(time.Millisecond * 10)
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
 	msg = strings.Repeat(msg, 50)
@@ -879,6 +889,7 @@ func TestSendFile(t *testing.T) {
 			t.Error()
 		}
 	}()
+	time.Sleep(time.Millisecond * 10)
 	conn, _ := net.Dial(network, addr)
 	if n, err := conn.Write([]byte(contents)); err != nil {
 		t.Error(err)
@@ -924,6 +935,7 @@ func TestReadFromLimitedReader(t *testing.T) {
 			t.Error()
 		}
 	}()
+	time.Sleep(time.Millisecond * 10)
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
 	msg = strings.Repeat(msg, 50)
@@ -974,6 +986,7 @@ func TestGenericReadFrom(t *testing.T) {
 			t.Error()
 		}
 	}()
+	time.Sleep(time.Millisecond * 10)
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
 	msg = strings.Repeat(msg, 50)
@@ -1021,6 +1034,7 @@ func TestGenericReadFromRemain(t *testing.T) {
 			t.Error()
 		}
 	}()
+	time.Sleep(time.Millisecond * 10)
 	conn, _ := net.Dial(network, addr)
 	msg := "Hello World"
 	msg = strings.Repeat(msg, 50)

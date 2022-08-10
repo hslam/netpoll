@@ -41,6 +41,7 @@ type Server struct {
 	UnsharedWorkers int
 	SharedWorkers   int
 	addr            net.Addr
+	ln              net.Listener
 	netServer       *netServer
 	file            *os.File
 	fd              int
@@ -116,13 +117,16 @@ func (s *Server) Serve(l net.Listener) (err error) {
 			l.Close()
 			return err
 		}
+		s.ln = l
 	default:
 		s.netServer = &netServer{Handler: s.Handler}
 		return s.netServer.Serve(l)
 	}
 	s.fd = int(s.file.Fd())
 	s.addr = l.Addr()
-	l.Close()
+	if s.ln == nil {
+		l.Close()
+	}
 	if err := syscall.SetNonblock(s.fd, true); err != nil {
 		return err
 	}
@@ -372,6 +376,9 @@ func (s *Server) Close() error {
 	}
 	if err := s.file.Close(); err != nil {
 		return err
+	}
+	if s.ln != nil {
+		s.ln.Close()
 	}
 	if s.done != nil {
 		close(s.done)
