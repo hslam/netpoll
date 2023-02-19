@@ -7,8 +7,10 @@
 package netpoll
 
 import (
+	ctx "context"
 	"errors"
 	"github.com/hslam/buffer"
+	"github.com/hslam/reuse"
 	"github.com/hslam/scheduler"
 	"github.com/hslam/sendfile"
 	"github.com/hslam/splice"
@@ -40,6 +42,13 @@ type Server struct {
 	NoAsync         bool
 	UnsharedWorkers int
 	SharedWorkers   int
+	// If Control is not nil, it is called after creating the network
+	// connection but before binding it to the operating system.
+	//
+	// Network and address parameters passed to Control method are not
+	// necessarily the ones passed to Listen. For example, passing "tcp" to
+	// Listen will cause the Control function to be called with "tcp4" or "tcp6".
+	Control         func(network, address string, c syscall.RawConn) error
 	addr            net.Addr
 	ln              net.Listener
 	netServer       *netServer
@@ -70,7 +79,18 @@ func (s *Server) ListenAndServe() error {
 	if atomic.LoadInt32(&s.closed) != 0 {
 		return ErrServerClosed
 	}
-	ln, err := net.Listen(s.Network, s.Address)
+	var listenConfig = net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) (err error) {
+			var control = s.Control
+			if control != nil {
+				if err = control(network, address, c); err != nil {
+					return err
+				}
+			}
+			return reuse.Control(network, address, c)
+		},
+	}
+	ln, err := listenConfig.Listen(ctx.Background(), s.Network, s.Address)
 	if err != nil {
 		return err
 	}

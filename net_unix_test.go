@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -1092,4 +1093,56 @@ func TestMinHeap(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestControl(t *testing.T) {
+	var handler = &DataHandler{
+		NoShared:   false,
+		NoCopy:     false,
+		BufferSize: 1024,
+		HandlerFunc: func(req []byte) (res []byte) {
+			res = req
+			return
+		},
+	}
+	network := "tcp"
+	addr := ":9999"
+	server := &Server{
+		Network: network,
+		Address: addr,
+		Handler: handler,
+		NoAsync: false,
+		Control: func(network, address string, c syscall.RawConn) error {
+			return nil
+		},
+	}
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := server.ListenAndServe(); err == nil {
+			t.Error()
+		}
+	}()
+	time.Sleep(time.Millisecond * 10)
+	conn, _ := net.Dial(network, addr)
+	msg := "Hello World"
+	msg = strings.Repeat(msg, 50)
+	if n, err := conn.Write([]byte(msg)); err != nil {
+		t.Error(err)
+	} else if n != len(msg) {
+		t.Error(n)
+	}
+	buf := make([]byte, len(msg))
+	if n, err := conn.Read(buf); err != nil {
+		t.Error(err)
+	} else if n != len(msg) {
+		t.Error(n)
+	} else if string(buf) != msg {
+		t.Error(string(buf))
+	}
+	time.Sleep(time.Millisecond * 500)
+	conn.Close()
+	server.Close()
+	wg.Wait()
 }

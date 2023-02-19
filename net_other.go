@@ -7,7 +7,7 @@
 package netpoll
 
 import (
-	"errors"
+	ctx "context"
 	"net"
 	"sync/atomic"
 )
@@ -24,10 +24,15 @@ type Server struct {
 	UnsharedWorkers int
 	// SharedWorkers do not work for consisted with other system.
 	SharedWorkers int
-	// TasksPerWorker do not work for consisted with other system.
-	TasksPerWorker int
-	netServer      *netServer
-	closed         int32
+	// If Control is not nil, it is called after creating the network
+	// connection but before binding it to the operating system.
+	//
+	// Network and address parameters passed to Control method are not
+	// necessarily the ones passed to Listen. For example, passing "tcp" to
+	// Listen will cause the Control function to be called with "tcp4" or "tcp6".
+	Control   func(network, address strng, c syscall.RawConn) error
+	netServer *netServer
+	closed    int32
 }
 
 // ListenAndServe listens on the network address and then calls
@@ -39,7 +44,10 @@ func (s *Server) ListenAndServe() error {
 	if atomic.LoadInt32(&s.closed) != 0 {
 		return ErrServerClosed
 	}
-	ln, err := net.Listen(s.Network, s.Address)
+	var listenConfig = net.ListenConfig{
+		Control: s.Control,
+	}
+	ln, err := listenConfig.Listen(ctx.Background(), s.Network, s.Address)
 	if err != nil {
 		return err
 	}
