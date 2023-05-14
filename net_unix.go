@@ -25,6 +25,7 @@ import (
 )
 
 const (
+	maxIdles = 16
 	idleTime = time.Second
 )
 
@@ -426,9 +427,12 @@ func (w *worker) run(wg *sync.WaitGroup) {
 	defer wg.Done()
 	var n int
 	var err error
+	var idles int
 	for err == nil {
 		n, err = w.poll.Wait(w.events)
 		if n > 0 {
+			idles = 0
+			w.poll.SetTimeout(0)
 			for i := range w.events[:n] {
 				ev := w.events[i]
 				if w.async {
@@ -440,6 +444,12 @@ func (w *worker) run(wg *sync.WaitGroup) {
 				} else {
 					w.serve(ev)
 				}
+			}
+		} else {
+			idles++
+			if idles > maxIdles {
+				idles = 0
+				w.poll.SetTimeout(time.Second)
 			}
 		}
 		if atomic.LoadInt64(&w.count) < 1 {

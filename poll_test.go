@@ -17,7 +17,7 @@ func TestPoll(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	err = p.SetTimeout(0)
+	err = p.SetTimeout(-1)
 	if err != ErrTimeout {
 		t.Error(err)
 	}

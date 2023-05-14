@@ -4,6 +4,10 @@
 // Package netpoll implements a network poller based on epoll/kqueue.
 package netpoll
 
+import (
+	"errors"
+)
+
 // Mode represents the read/write mode.
 type Mode int
 
@@ -21,3 +25,6 @@ type Event struct {
 	// Mode represents the event mode.
 	Mode Mode
 }
+
+// ErrTimeout is the error returned by SetTimeout when time.Duration d < 0.
+var ErrTimeout = errors.New("negative interval for SetTimeout")
